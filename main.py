@@ -7,6 +7,7 @@ import threading
 import asyncio
 import signal
 import sys
+import os
 from src.services.teacher_bot_service import TeacherBotService
 from src.services.student_bot_service import StudentBotService
 from src.config.settings import Config
