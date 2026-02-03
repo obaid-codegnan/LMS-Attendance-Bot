@@ -138,11 +138,15 @@ def main():
     else:
         logger.warning("STUDENT_BOT_TOKEN not set - Student Bot disabled")
     
-    # Web Interface Thread
-    web_thread = threading.Thread(target=run_web_interface, daemon=True)
-    web_thread.start()
-    threads.append(web_thread)
-    logger.info("Web Interface thread started")
+    # Web Interface Thread (main thread, not daemon)
+    logger.info(f"Starting Web Interface on {host}:{port}")
+    logger.info(f"Listening on 0.0.0.0:{port}")
+    
+    try:
+        from src.web.app import app
+        app.run(host=host, port=port, debug=False, use_reloader=False, threaded=True)
+    except Exception as e:
+        logger.error(f"Web Interface error: {e}")
     
     logger.info("All services started successfully!")
     logger.info("Access Web Interface: http://localhost:5001")
