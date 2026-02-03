@@ -82,8 +82,14 @@ def run_web_interface():
     """Run web interface in separate thread."""
     try:
         from src.web.app import app
-        logger.info("Starting Web Interface on http://localhost:5001")
-        app.run(host='0.0.0.0', port=5001, debug=False, use_reloader=False, threaded=True)
+        import os
+        
+        # Use PORT from environment (Render sets this) or default to 5001
+        port = int(os.environ.get('PORT', 5001))
+        host = os.environ.get('HOST', '0.0.0.0')
+        
+        logger.info(f"Starting Web Interface on {host}:{port}")
+        app.run(host=host, port=port, debug=False, use_reloader=False, threaded=True)
     except Exception as e:
         logger.error(f"Web Interface error: {e}")
 
