@@ -1,0 +1,81 @@
+{% extends "base.html" %}
+
+{% block title %}Add Teacher - Face Recognition Admin{% endblock %}
+
+{% block content %}
+<div class="row">
+    <div class="col-12">
+        <h1 class="mb-4">Add Teacher</h1>
+    </div>
+</div>
+
+<div class="row">
+    <div class="col-md-8">
+        <div class="card">
+            <div class="card-header">
+                <h5><i class="fas fa-user-plus"></i> Teacher Information</h5>
+            </div>
+            <div class="card-body">
+                <form method="POST">
+                    <div class="mb-3">
+                        <label for="name" class="form-label">Full Name *</label>
+                        <input type="text" class="form-control" id="name" name="name" required>
+                    </div>
+                    
+                    <div class="mb-3">
+                        <label for="phone" class="form-label">Phone Number *</label>
+                        <input type="tel" class="form-control" id="phone" name="phone" 
+                               placeholder="+91XXXXXXXXXX" required>
+                        <div class="form-text">Include country code (e.g., +91 for India)</div>
+                    </div>
+                    
+                    <div class="mb-3">
+                        <label for="email" class="form-label">Email</label>
+                        <input type="email" class="form-control" id="email" name="email">
+                    </div>
+                    
+                    <div class="mb-3">
+                        <label for="batches" class="form-label">Assigned Batches *</label>
+                        <input type="text" class="form-control" id="batches" name="batches" 
+                               placeholder="batch1, batch2, batch3" required>
+                        <div class="form-text">Enter batch names separated by commas</div>
+                    </div>
+                    
+                    <div class="mb-3">
+                        <label for="subjects" class="form-label">Subjects *</label>
+                        <input type="text" class="form-control" id="subjects" name="subjects" 
+                               placeholder="python, sql, java" required>
+                        <div class="form-text">Enter subject names separated by commas</div>
+                    </div>
+                    
+                    <div class="d-flex gap-2">
+                        <button type="submit" class="btn btn-primary">
+                            <i class="fas fa-save"></i> Add Teacher
+                        </button>
+                        <a href="{{ url_for('dashboard') }}" class="btn btn-secondary">
+                            <i class="fas fa-arrow-left"></i> Back to Dashboard
+                        </a>
+                    </div>
+                </form>
+            </div>
+        </div>
+    </div>
+    
+    <div class="col-md-4">
+        <div class="card">
+            <div class="card-header">
+                <h6><i class="fas fa-info-circle"></i> Instructions</h6>
+            </div>
+            <div class="card-body">
+                <ul class="list-unstyled">
+                    <li><i class="fas fa-check text-success"></i> Phone number must be unique</li>
+                    <li><i class="fas fa-check text-success"></i> Include country code in phone</li>
+                    <li><i class="fas fa-check text-success"></i> Separate multiple batches with commas</li>
+                    <li><i class="fas fa-check text-success"></i> Separate multiple subjects with commas</li>
+                    <li><i class="fas fa-check text-success"></i> Teacher can login via Telegram bot</li>
+                </ul>
+            </div>
+        </div>
+    </div>
+</div>
+{% endblock %}

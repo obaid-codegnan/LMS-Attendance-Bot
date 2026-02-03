@@ -1,0 +1,245 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Real-time Attendance Dashboard</title>
+    <link href="https://cdn.jsdelivr.net/npm/bootstrap@5.1.3/dist/css/bootstrap.min.css" rel="stylesheet">
+    <style>
+        .notification-container {
+            position: fixed;
+            top: 20px;
+            right: 20px;
+            z-index: 9999;
+            max-width: 400px;
+        }
+        .status-indicator {
+            display: inline-block;
+            width: 10px;
+            height: 10px;
+            border-radius: 50%;
+            margin-right: 5px;
+        }
+        .status-connected { background-color: #28a745; }
+        .status-connecting { background-color: #ffc107; }
+        .status-disconnected { background-color: #dc3545; }
+        .attendance-row-new {
+            animation: highlightNew 2s ease-in-out;
+        }
+        @keyframes highlightNew {
+            0% { background-color: #d4edda; }
+            100% { background-color: transparent; }
+        }
+    </style>
+</head>
+<body>
+    <div class="container-fluid">
+        <div class="row">
+            <div class="col-12">
+                <div class="d-flex justify-content-between align-items-center mb-4">
+                    <h1>Real-time Attendance Dashboard</h1>
+                    <div class="d-flex align-items-center">
+                        <span class="status-indicator status-connecting" id="status-indicator"></span>
+                        <span id="connection-status">Connecting...</span>
+                    </div>
+                </div>
+                
+                <!-- Session Info -->
+                <div class="card mb-4" data-session-id="{{ session.otp if session else '' }}">
+                    <div class="card-body">
+                        {% if session %}
+                        <h5 class="card-title">Active Session</h5>
+                        <div class="row">
+                            <div class="col-md-3">
+                                <strong>OTP:</strong> {{ session.otp }}
+                            </div>
+                            <div class="col-md-3">
+                                <strong>Subject:</strong> {{ session.subject }}
+                            </div>
+                            <div class="col-md-3">
+                                <strong>Batch:</strong> {{ session.batch_name }}
+                            </div>
+                            <div class="col-md-3">
+                                <strong>Status:</strong> <span class="badge bg-success">Active</span>
+                            </div>
+                        </div>
+                        {% else %}
+                        <h5 class="card-title">No Active Session</h5>
+                        <p class="text-muted">Start a session from Telegram to see real-time updates</p>
+                        {% endif %}
+                    </div>
+                </div>
+                
+                <!-- Real-time Attendance Table -->
+                <div class="card">
+                    <div class="card-header">
+                        <h5 class="mb-0">Live Attendance Updates</h5>
+                    </div>
+                    <div class="card-body">
+                        <div class="table-responsive">
+                            <table class="table table-striped" id="attendance-table">
+                                <thead>
+                                    <tr>
+                                        <th>Student ID</th>
+                                        <th>Subject</th>
+                                        <th>Status</th>
+                                        <th>Time</th>
+                                    </tr>
+                                </thead>
+                                <tbody>
+                                    <!-- Real-time updates will appear here -->
+                                </tbody>
+                            </table>
+                        </div>
+                    </div>
+                </div>
+            </div>
+        </div>
+    </div>
+    
+    <!-- Notification Container -->
+    <div class="notification-container" id="notification-container"></div>
+    
+    <script src="https://cdn.jsdelivr.net/npm/bootstrap@5.1.3/dist/js/bootstrap.bundle.min.js"></script>
+    <script>
+        class RealtimeAttendance {
+            constructor() {
+                this.sessionId = document.querySelector('[data-session-id]')?.dataset.sessionId;
+                this.eventSource = null;
+                this.reconnectDelay = 1000;
+                this.maxReconnectDelay = 30000;
+                this.statusIndicator = document.getElementById('status-indicator');
+                this.connectionStatus = document.getElementById('connection-status');
+                this.attendanceTable = document.querySelector('#attendance-table tbody');
+                
+                if (this.sessionId) {
+                    this.connect();
+                }
+            }
+            
+            connect() {
+                if (this.eventSource) {
+                    this.eventSource.close();
+                }
+                
+                this.updateStatus('connecting', 'Connecting...');
+                
+                this.eventSource = new EventSource(`/api/realtime/events?session_id=${this.sessionId}`);
+                
+                this.eventSource.onopen = () => {
+                    console.log('Real-time connection established');
+                    this.reconnectDelay = 1000;
+                    this.updateStatus('connected', 'Connected');
+                };
+                
+                this.eventSource.addEventListener('attendance_marked', (event) => {
+                    const data = JSON.parse(event.data);
+                    this.handleAttendanceMarked(data.data);
+                });
+                
+                this.eventSource.addEventListener('verification_failed', (event) => {
+                    const data = JSON.parse(event.data);
+                    this.handleVerificationFailed(data.data);
+                });
+                
+                this.eventSource.addEventListener('session_started', (event) => {
+                    const data = JSON.parse(event.data);
+                    this.handleSessionStarted(data.data);
+                });
+                
+                this.eventSource.onerror = () => {
+                    console.log('Real-time connection error, reconnecting...');
+                    this.updateStatus('disconnected', 'Reconnecting...');
+                    this.reconnect();
+                };
+            }
+            
+            reconnect() {
+                setTimeout(() => {
+                    this.connect();
+                    this.reconnectDelay = Math.min(this.reconnectDelay * 2, this.maxReconnectDelay);
+                }, this.reconnectDelay);
+            }
+            
+            updateStatus(status, text) {
+                this.statusIndicator.className = `status-indicator status-${status}`;
+                this.connectionStatus.textContent = text;
+            }
+            
+            handleAttendanceMarked(data) {
+                this.showNotification(`✅ ${data.student_id} marked present for ${data.subject}`, 'success');
+                this.addAttendanceRow(data.student_id, data.subject, 'Present', new Date());
+            }
+            
+            handleVerificationFailed(data) {
+                this.showNotification(`❌ ${data.student_id}: ${data.message}`, 'danger');
+            }
+            
+            handleSessionStarted(data) {
+                this.showNotification(`📚 Session started: ${data.subject} (${data.batch})`, 'info');
+            }
+            
+            addAttendanceRow(studentId, subject, status, time) {
+                const row = document.createElement('tr');
+                row.className = 'attendance-row-new';
+                
+                const statusBadge = status === 'Present' ? 
+                    '<span class="badge bg-success">Present</span>' : 
+                    '<span class="badge bg-danger">Absent</span>';
+                
+                row.innerHTML = `
+                    <td>${studentId}</td>
+                    <td>${subject}</td>
+                    <td>${statusBadge}</td>
+                    <td>${time.toLocaleTimeString()}</td>
+                `;
+                
+                this.attendanceTable.insertBefore(row, this.attendanceTable.firstChild);
+                
+                // Remove animation class after animation completes
+                setTimeout(() => {
+                    row.classList.remove('attendance-row-new');
+                }, 2000);
+            }
+            
+            showNotification(message, type) {
+                const notification = document.createElement('div');
+                notification.className = `alert alert-${type} alert-dismissible fade show`;
+                notification.innerHTML = `
+                    ${message}
+                    <button type="button" class="btn-close" data-bs-dismiss="alert"></button>
+                `;
+                
+                document.getElementById('notification-container').appendChild(notification);
+                
+                // Auto remove after 5 seconds
+                setTimeout(() => {
+                    if (notification.parentNode) {
+                        notification.remove();
+                    }
+                }, 5000);
+            }
+            
+            disconnect() {
+                if (this.eventSource) {
+                    this.eventSource.close();
+                    this.eventSource = null;
+                }
+                this.updateStatus('disconnected', 'Disconnected');
+            }
+        }
+        
+        // Initialize real-time updates when page loads
+        document.addEventListener('DOMContentLoaded', function() {
+            window.realtimeAttendance = new RealtimeAttendance();
+        });
+        
+        // Cleanup on page unload
+        window.addEventListener('beforeunload', function() {
+            if (window.realtimeAttendance) {
+                window.realtimeAttendance.disconnect();
+            }
+        });
+    </script>
+</body>
+</html>

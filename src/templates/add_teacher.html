@@ -1,0 +1,426 @@
+<!DOCTYPE html>
+<html lang="en">
+
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Face Recognition - Add Teacher</title>
+    <style>
+        body {
+            font-family: 'Segoe UI', Tahoma, Geneva, Verdana, sans-serif;
+            margin: 0;
+            padding: 0;
+            background: #f0f2f5;
+        }
+
+        .container {
+            max-width: 900px;
+            margin: 50px auto;
+            background: white;
+            border-radius: 12px;
+            box-shadow: 0 4px 12px rgba(0, 0, 0, 0.1);
+            overflow: hidden;
+        }
+
+        .header {
+            background: linear-gradient(135deg, #2c3e50 0%, #3498db 100%);
+            padding: 30px;
+            color: white;
+        }
+
+        .header h1 {
+            margin: 0;
+            font-size: 24px;
+        }
+
+        .header p {
+            margin: 10px 0 0;
+            opacity: 0.8;
+        }
+
+        .top-nav {
+            display: flex;
+            gap: 15px;
+            margin-bottom: 15px;
+            justify-content: flex-start;
+        }
+
+        .top-nav a {
+            color: white;
+            text-decoration: none;
+            font-weight: 600;
+            font-size: 14px;
+            opacity: 0.8;
+            padding: 5px 10px;
+            border-radius: 4px;
+            border: 1px solid transparent;
+        }
+
+        .top-nav a:hover {
+            opacity: 1;
+            background: rgba(255, 255, 255, 0.1);
+        }
+
+        .content {
+            padding: 40px;
+        }
+
+        .form-group {
+            margin-bottom: 20px;
+            text-align: left;
+        }
+
+        .form-group label {
+            display: block;
+            margin-bottom: 8px;
+            font-weight: 600;
+            color: #2c3e50;
+        }
+
+        .form-group input,
+        .form-group textarea {
+            width: 100%;
+            padding: 12px;
+            border: 1px solid #ddd;
+            border-radius: 6px;
+            font-size: 14px;
+            box-sizing: border-box;
+            /* Important for padding */
+        }
+
+        .form-group .hint {
+            font-size: 12px;
+            color: #7f8c8d;
+            margin-top: 5px;
+        }
+
+        .action-button {
+            background: #27ae60;
+            color: white;
+            border: none;
+            padding: 15px 40px;
+            font-size: 1.1em;
+            font-weight: 600;
+            border-radius: 6px;
+            cursor: pointer;
+            transition: background 0.2s;
+            width: 100%;
+        }
+
+        .action-button:hover:not(:disabled) {
+            background: #219150;
+        }
+
+        .status {
+            padding: 15px;
+            border-radius: 6px;
+            margin-top: 20px;
+            font-weight: 500;
+            display: none;
+        }
+
+        .status.success {
+            background-color: #d4edda;
+            color: #155724;
+            display: block;
+        }
+
+        .status.error {
+            background-color: #f8d7da;
+            color: #721c24;
+            display: block;
+        }
+
+        .subject-time-row {
+            display: flex;
+            align-items: center;
+            gap: 10px;
+            margin-bottom: 10px;
+            padding: 10px;
+            background: #f8f9fa;
+            border-radius: 6px;
+            border: 1px solid #e9ecef;
+        }
+
+        .subject-select {
+            flex: 1;
+            padding: 8px;
+            border: 1px solid #ddd;
+            border-radius: 4px;
+        }
+
+        .time-start, .time-end {
+            padding: 8px;
+            border: 1px solid #ddd;
+            border-radius: 4px;
+            width: 120px;
+        }
+
+        .btn-add, .btn-remove {
+            padding: 8px 15px;
+            border: none;
+            border-radius: 4px;
+            cursor: pointer;
+            font-size: 14px;
+            font-weight: 500;
+        }
+
+        .btn-add {
+            background: #3498db;
+            color: white;
+            margin-top: 10px;
+        }
+
+        .btn-add:hover {
+            background: #2980b9;
+        }
+
+        .btn-remove {
+            background: #e74c3c;
+            color: white;
+        }
+
+        .btn-remove:hover {
+            background: #c0392b;
+        }
+    </style>
+</head>
+
+<body>
+    <div class="container">
+        <div class="header">
+            <div class="top-nav">
+                {% from 'components/navbar_links.html' import render_common_navbar_links %}
+                {{ render_common_navbar_links('/add-teacher') }}
+            </div>
+            <h1>Add New Teacher</h1>
+            <p>Register a teacher for the Telegram Attendance Bot.</p>
+        </div>
+
+        <div class="content">
+            <div class="form-group">
+                <label for="name">Teacher Name</label>
+                <input type="text" id="name" placeholder="e.g. John Doe">
+            </div>
+
+            <div class="form-group">
+                <label for="phone">Phone Number</label>
+                <input type="text" id="phone" placeholder="e.g. 9876543210 (10 digits)">
+                <div class="hint">Bot will verify this number. Country code +91 added automatically if missing.</div>
+            </div>
+
+            <div class="form-group">
+                <label for="batches">Assigned Batches</label>
+                <input type="text" id="batches" placeholder="e.g. JFS-VIJ-01, PFS-HYD-02">
+                <div class="hint">Comma separated list of batches this teacher manages.</div>
+            </div>
+
+            <div class="form-group">
+                <label for="subjects">Assigned Subjects</label>
+                <input type="text" id="subjects" placeholder="e.g. Java, Python, SQL">
+                <div class="hint">Comma separated list of subjects.</div>
+            </div>
+
+            <div class="form-group">
+                <label>Subject Time Restrictions</label>
+                <div class="hint">Set time slots for each batch and subject combination.</div>
+                
+                <div id="subjectTimeContainer">
+                    <div class="subject-group" style="border: 1px solid #ddd; padding: 15px; margin: 10px 0; border-radius: 6px; background: #f8f9fa;">
+                        <div style="margin-bottom: 15px;">
+                            <label style="display: block; margin-bottom: 5px; font-weight: 600;">Subject:</label>
+                            <select class="subject-select" style="width: 100%; padding: 8px; border: 1px solid #ddd; border-radius: 4px;">
+                                <option value="">Select Subject</option>
+                                <option value="java">Java</option>
+                                <option value="python">Python</option>
+                                <option value="sql">SQL</option>
+                                <option value="dsa">DSA</option>
+                                <option value="communication">Communication</option>
+                                <option value="aptitude">Aptitude</option>
+                                <option value="frontend">Frontend</option>
+                                <option value="practice">Practice</option>
+                            </select>
+                        </div>
+                        
+                        <div class="batch-times">
+                            <div class="batch-time-row" style="display: flex; gap: 10px; margin: 8px 0; align-items: center; flex-wrap: wrap;">
+                                <div style="flex: 1; min-width: 200px;">
+                                    <label style="display: block; font-size: 12px; margin-bottom: 3px; color: #666;">Batch Name:</label>
+                                    <input type="text" class="batch-name" placeholder="e.g. JFS-VIJ-01" style="width: 100%; padding: 8px; border: 1px solid #ddd; border-radius: 4px; box-sizing: border-box;">
+                                </div>
+                                <div style="display: flex; align-items: center; gap: 10px;">
+                                    <input type="time" class="batch-time-start" value="09:00" style="padding: 8px; border: 1px solid #ddd; border-radius: 4px;">
+                                    <span>to</span>
+                                    <input type="time" class="batch-time-end" value="10:00" style="padding: 8px; border: 1px solid #ddd; border-radius: 4px;">
+                                    <button type="button" class="btn-remove" onclick="removeBatchTimeRow(this)">Remove</button>
+                                </div>
+                            </div>
+                        </div>
+                        
+                        <div style="display: flex; gap: 10px; margin-top: 10px;">
+                            <button type="button" class="btn-add" onclick="addBatchTimeRow(this)">Add Batch Time</button>
+                            <button type="button" class="btn-remove" onclick="removeSubjectGroup(this)">Remove Subject</button>
+                        </div>
+                    </div>
+                </div>
+                
+                <button type="button" class="btn-add" onclick="addSubjectGroup()">Add Subject</button>
+                <div class="hint"><strong>Example:</strong> Python → JFS-VIJ-01 (09:00-10:00), PFS-HYD-02 (14:00-15:00)</div>
+            </div>
+
+            <button class="action-button" onclick="addTeacher()">Save Teacher</button>
+
+            <div id="statusMessage" class="status"></div>
+        </div>
+    </div>
+
+    <script>
+
+        function addSubjectGroup() {
+            console.log('addSubjectGroup called');
+            const container = document.getElementById('subjectTimeContainer');
+            const newGroup = document.createElement('div');
+            newGroup.className = 'subject-group';
+            newGroup.style.cssText = 'border: 1px solid #ddd; padding: 15px; margin: 10px 0; border-radius: 6px; background: #f8f9fa;';
+            newGroup.innerHTML = '<div style="margin-bottom: 15px;"><label style="display: block; margin-bottom: 5px; font-weight: 600;">Subject:</label><select class="subject-select" style="width: 100%; padding: 8px; border: 1px solid #ddd; border-radius: 4px;"><option value="">Select Subject</option><option value="java">Java</option><option value="python">Python</option><option value="sql">SQL</option><option value="dsa">DSA</option><option value="communication">Communication</option><option value="aptitude">Aptitude</option><option value="frontend">Frontend</option><option value="practice">Practice</option></select></div><div class="batch-times"><div class="batch-time-row" style="display: flex; gap: 10px; margin: 8px 0; align-items: center; flex-wrap: wrap;"><div style="flex: 1; min-width: 200px;"><label style="display: block; font-size: 12px; margin-bottom: 3px; color: #666;">Batch Name:</label><input type="text" class="batch-name" placeholder="e.g. JFS-VIJ-01" style="width: 100%; padding: 8px; border: 1px solid #ddd; border-radius: 4px; box-sizing: border-box;"></div><div style="display: flex; align-items: center; gap: 10px;"><input type="time" class="batch-time-start" value="09:00" style="padding: 8px; border: 1px solid #ddd; border-radius: 4px;"><span>to</span><input type="time" class="batch-time-end" value="10:00" style="padding: 8px; border: 1px solid #ddd; border-radius: 4px;"><button type="button" class="btn-remove" onclick="removeBatchTimeRow(this)">Remove</button></div></div></div><div style="display: flex; gap: 10px; margin-top: 10px;"><button type="button" class="btn-add" onclick="addBatchTimeRow(this)">Add Batch Time</button><button type="button" class="btn-remove" onclick="removeSubjectGroup(this)">Remove Subject</button></div>';
+            container.appendChild(newGroup);
+        }
+        
+        function removeSubjectGroup(button) {
+            console.log('removeSubjectGroup called');
+            const container = document.getElementById('subjectTimeContainer');
+            if (container.children.length > 1) {
+                button.closest('.subject-group').remove();
+            }
+        }
+        
+        function addBatchTimeRow(button) {
+            console.log('addBatchTimeRow called');
+            const subjectGroup = button.closest('.subject-group');
+            const batchTimes = subjectGroup.querySelector('.batch-times');
+            const newRow = document.createElement('div');
+            newRow.className = 'batch-time-row';
+            newRow.style.cssText = 'display: flex; gap: 10px; margin: 8px 0; align-items: center; flex-wrap: wrap;';
+            newRow.innerHTML = '<div style="flex: 1; min-width: 200px;"><label style="display: block; font-size: 12px; margin-bottom: 3px; color: #666;">Batch Name:</label><input type="text" class="batch-name" placeholder="e.g. JFS-VIJ-01" style="width: 100%; padding: 8px; border: 1px solid #ddd; border-radius: 4px; box-sizing: border-box;"></div><div style="display: flex; align-items: center; gap: 10px;"><input type="time" class="batch-time-start" value="09:00" style="padding: 8px; border: 1px solid #ddd; border-radius: 4px;"><span>to</span><input type="time" class="batch-time-end" value="10:00" style="padding: 8px; border: 1px solid #ddd; border-radius: 4px;"><button type="button" class="btn-remove" onclick="removeBatchTimeRow(this)">Remove</button></div>';
+            batchTimes.appendChild(newRow);
+        }
+        
+        function removeBatchTimeRow(button) {
+            console.log('removeBatchTimeRow called');
+            const batchTimes = button.closest('.batch-times');
+            if (batchTimes.children.length > 1) {
+                button.closest('.batch-time-row').remove();
+            }
+        }
+
+        function collectTimeRestrictions() {
+            const restrictions = {};
+            const subjectGroups = document.querySelectorAll('.subject-group');
+            
+            subjectGroups.forEach(group => {
+                const subject = group.querySelector('.subject-select').value;
+                if (subject) {
+                    const batchRows = group.querySelectorAll('.batch-time-row');
+                    const batchTimes = {};
+                    
+                    batchRows.forEach(row => {
+                        const batchName = row.querySelector('.batch-name').value.trim();
+                        const startTime = row.querySelector('.batch-time-start').value;
+                        const endTime = row.querySelector('.batch-time-end').value;
+                        
+                        if (batchName && startTime && endTime) {
+                            if (!batchTimes[batchName]) {
+                                batchTimes[batchName] = [];
+                            }
+                            batchTimes[batchName].push(`${startTime}-${endTime}`);
+                        }
+                    });
+                    
+                    if (Object.keys(batchTimes).length > 0) {
+                        restrictions[subject] = batchTimes;
+                    }
+                }
+            });
+            
+            return restrictions;
+        }
+
+        async function addTeacher() {
+            console.log('addTeacher called');
+            const name = document.getElementById('name').value.trim();
+            const phone = document.getElementById('phone').value.trim();
+            const batchesStr = document.getElementById('batches').value.trim();
+            const subjectsStr = document.getElementById('subjects').value.trim();
+            const statusDiv = document.getElementById('statusMessage');
+            const saveButton = document.querySelector('.action-button');
+
+            if (!name || !phone) {
+                statusDiv.className = 'status error';
+                statusDiv.textContent = 'Name and Phone Number are required.';
+                return;
+            }
+
+            // Show saving state
+            saveButton.disabled = true;
+            saveButton.textContent = 'Saving...';
+            statusDiv.className = 'status';
+            statusDiv.style.display = 'none';
+
+            // Prepare arrays
+            const batches = batchesStr ? batchesStr.split(',').map(s => s.trim()).filter(s => s) : [];
+            const subjects = subjectsStr ? subjectsStr.split(',').map(s => s.trim()).filter(s => s) : [];
+            
+            // Collect time restrictions from UI
+            const timeRestrictions = collectTimeRestrictions();
+
+            try {
+                const payload = {
+                    name: name,
+                    phone_number: phone,
+                    assigned_batches: batches,
+                    assigned_subjects: subjects
+                };
+                
+                // Add time restrictions if provided
+                if (Object.keys(timeRestrictions).length > 0) {
+                    payload.subject_time_restrictions = timeRestrictions;
+                }
+                
+                const response = await fetch('/api/teachers', {
+                    method: 'POST',
+                    headers: { 'Content-Type': 'application/json' },
+                    body: JSON.stringify(payload)
+                });
+
+                const data = await response.json();
+
+                if (response.ok && data.success) {
+                    statusDiv.className = 'status success';
+                    statusDiv.textContent = '✅ Teacher saved successfully!';
+                    // Clear form
+                    document.getElementById('name').value = '';
+                    document.getElementById('phone').value = '';
+                    document.getElementById('batches').value = '';
+                    document.getElementById('subjects').value = '';
+                    // Reset time restrictions to single subject group
+                    const container = document.getElementById('subjectTimeContainer');
+                    container.innerHTML = '<div class="subject-group" style="border: 1px solid #ddd; padding: 15px; margin: 10px 0; border-radius: 6px; background: #f8f9fa;"><div style="margin-bottom: 15px;"><label style="display: block; margin-bottom: 5px; font-weight: 600;">Subject:</label><select class="subject-select" style="width: 100%; padding: 8px; border: 1px solid #ddd; border-radius: 4px;"><option value="">Select Subject</option><option value="java">Java</option><option value="python">Python</option><option value="sql">SQL</option><option value="dsa">DSA</option><option value="communication">Communication</option><option value="aptitude">Aptitude</option><option value="frontend">Frontend</option><option value="practice">Practice</option></select></div><div class="batch-times"><div class="batch-time-row" style="display: flex; gap: 10px; margin: 8px 0; align-items: center;"><input type="text" class="batch-name" placeholder="Batch name (e.g. JFS-VIJ-01)" style="flex: 1; padding: 8px; border: 1px solid #ddd; border-radius: 4px;"><input type="time" class="batch-time-start" value="09:00" style="padding: 8px; border: 1px solid #ddd; border-radius: 4px;"><span>to</span><input type="time" class="batch-time-end" value="10:00" style="padding: 8px; border: 1px solid #ddd; border-radius: 4px;"><button type="button" class="btn-remove" onclick="removeBatchTimeRow(this)">Remove</button></div></div><div style="display: flex; gap: 10px; margin-top: 10px;"><button type="button" class="btn-add" onclick="addBatchTimeRow(this)">Add Batch Time</button><button type="button" class="btn-remove" onclick="removeSubjectGroup(this)">Remove Subject</button></div></div>';
+                } else {
+                    statusDiv.className = 'status error';
+                    statusDiv.textContent = '❌ ' + (data.message || 'Failed to add teacher.');
+                }
+
+            } catch (error) {
+                console.error(error);
+                statusDiv.className = 'status error';
+                statusDiv.textContent = '❌ Network Error: ' + error.message;
+            } finally {
+                // Reset button state
+                saveButton.disabled = false;
+                saveButton.textContent = 'Save Teacher';
+            }
+        }
+    </script>
+</body>
+
+</html>

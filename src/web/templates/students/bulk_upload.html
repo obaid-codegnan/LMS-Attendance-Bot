@@ -1,0 +1,112 @@
+{% extends "base.html" %}
+
+{% block title %}Bulk Upload Students - Face Recognition Admin{% endblock %}
+
+{% block content %}
+<div class="row">
+    <div class="col-12">
+        <h1 class="mb-4">Bulk Upload Students</h1>
+    </div>
+</div>
+
+<div class="row">
+    <div class="col-md-8">
+        <div class="card">
+            <div class="card-header">
+                <h5><i class="fas fa-upload"></i> Upload Student Data</h5>
+            </div>
+            <div class="card-body">
+                <form method="POST" enctype="multipart/form-data">
+                    <div class="mb-3">
+                        <label for="data_file" class="form-label">Student Data File *</label>
+                        <input type="file" class="form-control" id="data_file" name="data_file" 
+                               accept=".csv,.xlsx,.xls" required>
+                        <div class="form-text">Upload CSV or Excel file with student data</div>
+                    </div>
+                    
+                    <div class="mb-3">
+                        <label for="image_files" class="form-label">Face Images (Optional)</label>
+                        <input type="file" class="form-control" id="image_files" name="image_files" 
+                               accept="image/*" multiple webkitdirectory directory>
+                        <div class="form-text">Select a folder containing face images. Images will be matched by filename or student ID.</div>
+                    </div>
+                    
+                    <div class="alert alert-info">
+                        <h6><i class="fas fa-info-circle"></i> File Format Requirements:</h6>
+                        <p class="mb-2"><strong>Data File:</strong> Must contain the following columns:</p>
+                        <ul class="mb-2">
+                            <li><strong>STUDENT ID</strong> - Unique student identifier (required)</li>
+                            <li><strong>STUDENT NAME</strong> - Student full name (required)</li>
+                            <li><strong>BATCH</strong> - Batch name (required)</li>
+                            <li><strong>BRANCH</strong> - Branch location (optional)</li>
+                            <li><strong>DESIGNATION</strong> - Student designation (optional)</li>
+                            <li><strong>GENDER</strong> - Student gender (optional)</li>
+                            <li><strong>PHOTO</strong> - Image filename (optional)</li>
+                        </ul>
+                        <p class="mb-2"><strong>Images:</strong> Select folder containing images. Files matched by PHOTO column or STUDENT ID</p>
+                        <p class="mb-0"><strong>Storage:</strong> Images in students/{batch}/, data in metadata/training_model.xlsx</p>
+                    </div>
+                    
+                    <div class="d-flex gap-2">
+                        <button type="submit" class="btn btn-primary">
+                            <i class="fas fa-upload"></i> Upload Students
+                        </button>
+                        <a href="{{ url_for('dashboard') }}" class="btn btn-secondary">
+                            <i class="fas fa-arrow-left"></i> Back to Dashboard
+                        </a>
+                    </div>
+                </form>
+            </div>
+        </div>
+    </div>
+    
+    <div class="col-md-4">
+        <div class="card">
+            <div class="card-header">
+                <h6><i class="fas fa-download"></i> Sample File</h6>
+            </div>
+            <div class="card-body">
+                <p>Download a sample CSV file to see the correct format:</p>
+                <button class="btn btn-outline-primary btn-sm" onclick="downloadSample()">
+                    <i class="fas fa-download"></i> Download Sample CSV
+                </button>
+            </div>
+        </div>
+        
+        <div class="card mt-3">
+            <div class="card-header">
+                <h6><i class="fas fa-exclamation-triangle"></i> Important Notes</h6>
+            </div>
+            <div class="card-body">
+                <ul class="list-unstyled">
+                    <li><i class="fas fa-check text-warning"></i> Images stored in students/{batch}/</li>
+                    <li><i class="fas fa-check text-warning"></i> Data stored in metadata/training.model.xlsx</li>
+                    <li><i class="fas fa-check text-warning"></i> Excel file updated automatically</li>
+                    <li><i class="fas fa-check text-warning"></i> Name images as: student_id.jpg</li>
+                    <li><i class="fas fa-check text-warning"></i> Maximum file size: 16MB per file</li>
+                </ul>
+            </div>
+        </div>
+    </div>
+</div>
+{% endblock %}
+
+{% block scripts %}
+<script>
+function downloadSample() {
+    const csvContent = "STUDENT ID,STUDENT NAME,BATCH,BRANCH,DESIGNATION,GENDER,PHOTO\n20261,Venkata Datta,datascience,vijayawada,Python full Stack Trainee,Male,dsc01.jpg\n20262,Lokesh,datascience,vijayawada,Python full Stack Trainee,Male,dsc02.jpg";
+    
+    const blob = new Blob([csvContent], { type: 'text/csv' });
+    const url = window.URL.createObjectURL(blob);
+    const a = document.createElement('a');
+    a.href = url;
+    a.download = 'sample_students.csv';
+    document.body.appendChild(a);
+    a.click();
+    document.body.removeChild(a);
+    window.URL.revokeObjectURL(url);
+    
+    alert('Sample CSV downloaded!\n\nFor images, select the folder containing:\n- dsc01.jpg\n- dsc02.jpg\n- etc.');
+}
+</script>
+{% endblock %}
