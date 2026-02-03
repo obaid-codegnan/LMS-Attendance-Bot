@@ -16,10 +16,10 @@ class MongoRepository:
         self._connect()
     
     def _connect(self):
-        """Connect to MongoDB."""
+        """Connect to MongoDB with fallback mode."""
         try:
             if not Config.MONGODB_URI:
-                logger.warning("MONGODB_URI not configured, using fallback mode")
+                logger.warning("MONGODB_URI not configured, running in fallback mode")
                 return
             
             # Try to import pymongo
@@ -30,15 +30,16 @@ class MongoRepository:
                 logger.error("pymongo not installed. Install with: pip install pymongo")
                 return
                 
-            self.client = MongoClient(Config.MONGODB_URI)
+            self.client = MongoClient(Config.MONGODB_URI, serverSelectionTimeoutMS=5000)
             self.db = self.client[Config.MONGODB_DATABASE]
             
             # Test connection
             self.client.admin.command('ping')
-            logger.info("Connected to MongoDB successfully")
+            logger.info("MongoDB connected successfully")
             
         except Exception as e:
-            logger.error(f"Failed to connect to MongoDB: {e}")
+            logger.warning(f"MongoDB unavailable: {e}")
+            logger.info("Running in fallback mode without MongoDB")
             self.client = None
             self.db = None
     

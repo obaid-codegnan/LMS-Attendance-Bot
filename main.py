@@ -84,11 +84,12 @@ def run_web_interface():
         from src.web.app import app
         import os
         
-        # Use PORT from environment (Render sets this) or default to 5000
+        # Use PORT from environment (Render sets this)
         port = int(os.environ.get('PORT', 5000))
         host = os.environ.get('HOST', '0.0.0.0')
         
         logger.info(f"Starting Web Interface on {host}:{port}")
+        logger.info(f"Listening on 0.0.0.0:{port}")
         app.run(host=host, port=port, debug=False, use_reloader=False, threaded=True)
     except Exception as e:
         logger.error(f"Web Interface error: {e}")
@@ -101,6 +102,11 @@ def main():
     
     logger.info("=== Face Recognition Attendance System ===")
     logger.info("Starting all services...")
+    
+    # Get PORT from environment for Render
+    port = int(os.environ.get('PORT', 5000))
+    host = os.environ.get('HOST', '0.0.0.0')
+    logger.info(f"Using PORT: {port}, HOST: {host}")
     
     # Initialize face verification queue
     from src.utils.face_verification_queue import face_queue
