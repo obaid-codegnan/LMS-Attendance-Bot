@@ -1,11 +1,11 @@
-version: "1"
-build:
-  commands:
-    - pip install -r requirements.txt
-run:
-  command: python main.py
-env:
-  - key: PORT
-    value: "10000"
-  - key: HOST
-    value: "0.0.0.0"
+services:
+  - type: web
+    name: lms-attendance-bot
+    env: python
+    buildCommand: pip install -r requirements.txt
+    startCommand: python main.py
+    envVars:
+      - key: PORT
+        value: 10000
+      - key: HOST
+        value: 0.0.0.0

@@ -1,0 +1,1 @@
+#!/bin/bash\necho \"Starting LMS Attendance Bot...\"\necho \"Python version: $(python --version)\"\necho \"Current directory: $(pwd)\"\necho \"Files in directory: $(ls -la)\"\necho \"Starting application...\"\npython main.py
