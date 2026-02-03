@@ -1,0 +1,26 @@
+version: '3.8'
+
+services:
+  lms-attendance-bot:
+    build: .
+    ports:
+      - "5000:5000"
+    environment:
+      - PORT=5000
+      - HOST=0.0.0.0
+      - TEACHER_BOT_TOKEN=${TEACHER_BOT_TOKEN}
+      - STUDENT_BOT_TOKEN=${STUDENT_BOT_TOKEN}
+      - MONGODB_URI=${MONGODB_URI}
+      - MONGODB_DATABASE=${MONGODB_DATABASE}
+      - AWS_ACCESS_KEY_ID=${AWS_ACCESS_KEY_ID}
+      - AWS_SECRET_ACCESS_KEY=${AWS_SECRET_ACCESS_KEY}
+      - AWS_REGION=${AWS_REGION}
+      - AWS_S3_BUCKET=${AWS_S3_BUCKET}
+      - AWS_REKOGNITION_COLLECTION_ID=${AWS_REKOGNITION_COLLECTION_ID}
+      - BASE_URL=${BASE_URL}
+      - OLD_BASE_URL=${OLD_BASE_URL}
+      - OTP_EXPIRY_SECONDS=${OTP_EXPIRY_SECONDS}
+      - FACE_MATCH_THRESHOLD=${FACE_MATCH_THRESHOLD}
+    volumes:
+      - .:/app
+    restart: unless-stopped

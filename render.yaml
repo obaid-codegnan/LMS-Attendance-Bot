@@ -1,11 +1,10 @@
 services:
   - type: web
     name: lms-attendance-bot
-    env: python
-    buildCommand: pip install -r requirements.txt
-    startCommand: python main.py
+    env: docker
+    dockerfilePath: ./Dockerfile
     envVars:
       - key: PORT
-        value: 10000
+        value: 5000
       - key: HOST
         value: 0.0.0.0
