@@ -7,7 +7,7 @@ Werkzeug>=3.1.5,<4.0.0
 pymongo>=4.6.0,<5.0.0
 
 # Telegram Bot
-python-telegram-bot>=20.0,<20.8
+python-telegram-bot==20.7
 
 # Computer Vision & AWS
 opencv-python-headless>=4.8.0,<5.0.0
