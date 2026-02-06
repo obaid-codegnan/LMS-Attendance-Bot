@@ -7,24 +7,34 @@ A comprehensive, dual-bot attendance system integrating **Telegram**, **AWS Reko
 ### 1. Teacher Bot Service
 *   **Role**: Manages attendance sessions and views reports.
 *   **Technologies**:
-    *   **Python-Telegram-Bot (Async)**: Handles conversation flow (Login, Batch Selection).
-    *   **MongoDB**: Stores teacher profiles and session data.
+    *   **Python-Telegram-Bot (Async)**: Handles conversation flow with 30s timeout configuration.
+    *   **MongoDB**: Stores teacher credentials and session data locally.
+    *   **JWT Authentication**: Secure API access with access/refresh token pattern.
     *   **External API Integration**: Fetches batches/subjects and submits attendance.
     *   **AsyncIO**: Background tasks for auto-sending attendance reports after session expiry.
 *   **Key Functions**:
-    *   Secure Login (Telegram ID Verification).
-    *   Session Creation (Generates 6-digit OTP).
+    *   Phone + Password + Email verification.
+    *   JWT token management with automatic refresh.
+    *   Multi-batch selection with dynamic subject loading.
+    *   Session Creation (Generates 6-digit OTP, expires in 90 seconds).
     *   Real-time Location Capture (Sets the "Geofence" center).
-    *   API Caching (5-minute cache for repeated requests).
+    *   Credential caching for returning teachers.
 
 ### 2. Student Bot Service
 *   **Role**: Marks attendance securely on-site.
 *   **Technologies**:
-    *   **Python-Telegram-Bot**: Interactive interface for students.
-    *   **Geopy**: Precise distance calculation (Geodesic) to ensure student is within **300m** of the class.
-    *   **OpenCV (cv2)**: Extracts frames from **Telegram Video Notes** (Liveness check) for processing.
-    *   **AWS Rekognition**: Enterprise-grade face comparison against stored ID card photos.
-    *   **Queue-based Processing**: Dynamic face verification queue with auto-scaling thread pools.
+    *   **Python-Telegram-Bot**: Interactive interface with 30s timeout configuration.
+    *   **Geopy**: Precise distance calculation (Geodesic) to ensure student is within **50m** of the class.
+    *   **OpenCV (cv2)**: Extracts frames from **Telegram Video Notes** for processing.
+    *   **AWS Rekognition**: Enterprise-grade face comparison (70% threshold).
+    *   **Queue-based Processing**: Dynamic face verification queue with auto-scaling thread pools (2-100 workers).
+*   **Key Features**:
+    *   Student ID and OTP validation.
+    *   50-meter geofence enforcement.
+    *   Video note processing with immediate acknowledgment.
+    *   Background face verification (sub-2 second processing).
+    *   Automatic attendance submission with teacher JWT credentials.
+    *   Clear error messages for missing ID photos.
 
 ### 3. Backend Core & API
 *   **Framework**: **Flask** + **Flask-RESTful**.
@@ -74,8 +84,12 @@ BASE_URL=http://your-lms-api.com/api/v1
 OLD_BASE_URL=http://your-lms-api.com/api/v1
 
 # --- CONFIG ---
-OTP_EXPIRY_SECONDS=300
-FACE_MATCH_THRESHOLD=80
+OTP_EXPIRY_SECONDS=90
+LOCATION_DISTANCE_LIMIT_METERS=50
+FACE_MATCH_THRESHOLD=70
+
+# --- JWT AUTHENTICATION ---
+JWT_LOGIN_ENDPOINT=https://login.codegnan.ai/api/v1/login
 ```
 
 ### 4. Running the System
@@ -93,33 +107,41 @@ python main.py
 
 ### Teacher Flow
 1.  **Start**: Teacher sends `/start` to Teacher Bot.
-2.  **Authentication**: Bot verifies Telegram ID against database/hardcoded mentor ID.
-3.  **Batch Loading**: System fetches available batches from external API (cached for 5 minutes).
-4.  **Selection**: Teacher selects **Batches** (multi-select) and **Subject**.
-5.  **Location**: Teacher shares **Live Location** → Bot generates **6-digit OTP**.
-6.  **Session Creation**: 
+2.  **Phone Verification**: Teacher shares contact via Telegram.
+3.  **Password Entry**: Teacher enters API login password.
+4.  **Email Collection**: Teacher provides email/username.
+5.  **JWT Authentication**: System authenticates with external API and stores credentials.
+6.  **Batch Loading**: System fetches available batches from external API using teacher's credentials.
+7.  **Selection**: Teacher selects **Batches** (multi-select) and **Subject**.
+8.  **Location**: Teacher shares **Live Location** → Bot generates **6-digit OTP**.
+9.  **Session Creation**: 
     *   Fetches student list from external API for selected batches/subject.
-    *   Stores session in MongoDB with OTP, location, and student data.
-    *   Schedules automatic report generation after OTP expiry.
+    *   Stores session in MongoDB with OTP, location, student data, and teacher credentials.
+    *   Schedules automatic report generation after OTP expiry (90 seconds).
 
 ### Student Flow
 1.  **Start**: Student sends `/start` to Student Bot.
 2.  **Authentication**: Student enters **Student ID** + **Class OTP**.
 3.  **Validation**: System validates OTP and checks if student is enrolled in the session.
-4.  **Location Check**: Student shares location → System verifies distance < 300m from Teacher.
+4.  **Location Check**: Student shares location → System verifies distance < 50m from Teacher.
 5.  **Face Verification**: 
     *   Student records a **Video Note** (Circle Video).
     *   System downloads video bytes and adds to verification queue.
     *   Background worker extracts frame and compares with S3 stored ID photo using AWS Rekognition.
-    *   Attendance marked via external API (POST for first student, PUT for subsequent).
+    *   Attendance marked via external API using teacher's JWT credentials.
+    *   **First student**: POST method creates new attendance record.
+    *   **Subsequent students**: PUT method updates existing record.
 6.  **Result**: Student receives immediate confirmation of attendance status.
 
 ### API Integration Flow
-1.  **Student Data**: `POST /attend` - Fetch students for batch/subject.
-2.  **Attendance Submission**: 
-    *   First student in session: `POST /attendance`
-    *   Subsequent students: `PUT /attendance`
-3.  **Report Generation**: Automatic attendance report sent to teacher after session expiry.
+1.  **Teacher Authentication**: JWT login with access/refresh tokens.
+2.  **Batch/Subject Fetch**: Using teacher's credentials from external API.
+3.  **Student Data**: `POST /attend` - Fetch students for batch/subject.
+4.  **Attendance Submission**: 
+    *   First student in session: `POST /attendance` (creates record)
+    *   Subsequent students: `PUT /attendance` (updates record)
+    *   Duplicate handling: 403 errors treated as success
+5.  **Report Generation**: Automatic attendance report sent to teacher after session expiry.
 
 ---
 
