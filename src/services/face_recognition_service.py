@@ -282,10 +282,15 @@ class FaceRecognitionService:
             if response['FaceMatches']:
                 confidence = response['FaceMatches'][0]['Similarity']
                 total_time = s3_time + resize_time + aws_time
+                
+                # Extract batch from found S3 key
+                found_batch = found_s3_key.split('/')[1] if found_s3_key and '/' in found_s3_key else ''
+                
                 return {
                     "success": True,
                     "confidence": confidence,
                     "student_id": student_id,
+                    "found_in_batch": found_batch,
                     "timing": {
                         "s3_search": s3_time,
                         "image_resize": resize_time,

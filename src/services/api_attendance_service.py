@@ -253,21 +253,16 @@ class APIAttendanceService:
             return False
     
     def get_attendance_report(self, batch: str, subject: str, date: str = None, session_data: dict = None) -> Dict:
-        """Get attendance report from API."""
+        """Get attendance report from API - handles multi-batch sessions."""
         try:
             if not date:
                 date = datetime.now().strftime("%Y-%m-%d")
             
-            # Get attendance data from API
-            url = f"{self.api_service.base_url}/getattends"
-            params = {
-                "location": "vijayawada",
-                "subject": subject,
-                "batch": batch,
-                "userType": "Mentor"
-            }
+            # Handle multi-batch sessions
+            batches = [b.strip() for b in batch.split(',')]
             
-            logger.info(f"Fetching attendance report with params: {params}")
+            all_present = []
+            all_absent = []
             
             # Use teacher credentials from session if available
             teacher_credentials = session_data.get('teacher_credentials') if session_data else None
@@ -279,80 +274,60 @@ class APIAttendanceService:
             else:
                 headers = self.api_service._get_headers()
             
-            response = requests.get(url, params=params, headers=headers, timeout=10)
-            
-            if response.status_code == 200:
-                data = response.json()
-                
-                # Parse the correct response format: {"data": [{"2026-02-02": {"Python": {"students": [...]}}}]}
-                present = []
-                absent = []
-                
-                # Navigate through the nested structure
-                data_list = data.get("data", [])
-                
-                for i, date_item in enumerate(data_list):
-                    if isinstance(date_item, dict):
-                        # Check if this item has a 'dates' field
-                        if 'dates' in date_item:
-                            dates_data = date_item['dates']
-                            
-                            # Look for today's date in the dates data
-                            if date in dates_data:
-                                subjects_data = dates_data[date]
-                                
-                                if subject in subjects_data:
-                                    subject_data = subjects_data[subject]
-                                    students = subject_data.get("students", [])
-                                    
-                                    for student in students:
-                                        student_id = student.get("studentId")
-                                        status = student.get("status", 0)
-                                        name = student.get("name", "")
-                                        
-                                        if student_id:
-                                            if status == 1:
-                                                present.append(f"{student_id} - {name}")
-                                            else:
-                                                absent.append(f"{student_id} - {name}")
-                                    
-                                    break  # Found the subject, no need to continue
-                            else:
-                                logger.warning(f"Date {date} not found in dates. Available dates: {list(dates_data.keys()) if isinstance(dates_data, dict) else 'None'}")
-                        else:
-                            # Fallback: check if date is directly in the item (old format)
-                            if date in date_item:
-                                subjects_data = date_item[date]
-                                
-                                if subject in subjects_data:
-                                    subject_data = subjects_data[subject]
-                                    students = subject_data.get("students", [])
-                                    
-                                    for student in students:
-                                        student_id = student.get("studentId")
-                                        status = student.get("status", 0)
-                                        name = student.get("name", "")
-                                        
-                                        if student_id:
-                                            if status == 1:
-                                                present.append(f"{student_id} - {name}")
-                                            else:
-                                                absent.append(f"{student_id} - {name}")
-                                    
-                                    break  # Found the subject, no need to continue
-                
-                return {
-                    "present": present,
-                    "absent": absent,
-                    "total": len(present) + len(absent),
-                    "date": date,
-                    "batch": batch,
-                    "subject": subject
+            # Fetch attendance for each batch
+            for batch_name in batches:
+                url = f"{self.api_service.base_url}/getattends"
+                params = {
+                    "location": "vijayawada",
+                    "subject": subject,
+                    "batch": batch_name,
+                    "userType": "Mentor"
                 }
-            else:
-                logger.error(f"Failed to get attendance report: {response.status_code} - {response.text[:200]}")
-                return {"present": [], "absent": [], "total": 0, "date": date, "batch": batch, "subject": subject}
+                
+                logger.info(f"Fetching attendance report for batch {batch_name} with params: {params}")
+                
+                response = requests.get(url, params=params, headers=headers, timeout=10)
+                
+                if response.status_code == 200:
+                    data = response.json()
+                    data_list = data.get("data", [])
+                    
+                    for date_item in data_list:
+                        if isinstance(date_item, dict):
+                            subjects_data = None
+                            
+                            # Check both formats
+                            if 'dates' in date_item and date in date_item['dates']:
+                                subjects_data = date_item['dates'][date]
+                            elif date in date_item:
+                                subjects_data = date_item[date]
+                            
+                            if subjects_data and subject in subjects_data:
+                                subject_data = subjects_data[subject]
+                                students = subject_data.get("students", [])
+                                
+                                for student in students:
+                                    student_id = student.get("studentId")
+                                    status = student.get("status", 0)
+                                    name = student.get("name", "")
+                                    
+                                    if student_id:
+                                        if status == 1:
+                                            all_present.append(f"{student_id} - {name}")
+                                        else:
+                                            all_absent.append(f"{student_id} - {name}")
+                                
+                                break
+            
+            return {
+                "present": all_present,
+                "absent": all_absent,
+                "total": len(all_present) + len(all_absent),
+                "date": date,
+                "batch": batch,
+                "subject": subject
+            }
             
         except Exception as e:
             logger.error(f"Error getting attendance report: {e}")
-            return {"present": [], "absent": [], "total": 0, "date": date or datetime.now().strftime("%Y-%m-%d")}
+            return {"present": [], "absent": [], "total": 0, "date": date or datetime.now().strftime("%Y-%m-%d"), "batch": batch, "subject": subject}

@@ -122,7 +122,8 @@ class MongoRepository:
                         'subject': session.get('subject', ''),
                         'lat': session.get('lat'),
                         'long': session.get('long'),
-                        'teacher_credentials': session.get('teacher_credentials')
+                        'teacher_credentials': session.get('teacher_credentials'),
+                        'students': students  # Include all students for batch lookup
                     }
                 }
             else:

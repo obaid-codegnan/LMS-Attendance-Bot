@@ -161,12 +161,31 @@ class DynamicFaceVerificationQueue:
                 
                 # Step 2: Mark attendance with timing
                 api_start = time.time()
-                logger.info(f"[{task.request_id}] Marking attendance for {task.student_id} in {task.session_info['batch_name']}/{task.session_info['subject']}")
+                
+                # Determine student's actual batch from session data
+                student_data = task.session_info.get('students', {}).get(task.student_id, {})
+                student_batch = student_data.get('BatchNo', '')
+                
+                logger.info(f"[{task.request_id}] Student data from session: {student_data}")
+                logger.info(f"[{task.request_id}] Student batch from session: {student_batch}")
+                
+                if not student_batch or ',' in student_batch:
+                    # Batch is combined or missing, use the batch where image was found
+                    found_batch = verification_result.get('found_in_batch', '')
+                    if found_batch:
+                        student_batch = found_batch
+                        logger.info(f"[{task.request_id}] Using batch from face recognition: {student_batch}")
+                    else:
+                        # Fallback: use first batch from session
+                        student_batch = task.session_info['batch_name'].split(',')[0].strip()
+                        logger.info(f"[{task.request_id}] Using first batch as fallback: {student_batch}")
+                
+                logger.info(f"[{task.request_id}] Marking attendance for {task.student_id} in batch {student_batch}/{task.session_info['subject']}")
                 
                 try:
                     success = asyncio.run(attendance_service.mark_student_present_async(
                         student_id=task.student_id,
-                        batch=task.session_info['batch_name'],
+                        batch=student_batch,
                         subject=task.session_info['subject'],
                         teacher_credentials=task.teacher_credentials
                     ))
@@ -190,7 +209,7 @@ class DynamicFaceVerificationQueue:
                         chat_id=task.user_id,
                         text=messages.verification('success',
                             student_id=task.student_id,
-                            batch=task.session_info['batch_name'],
+                            batch=student_batch,
                             subject=task.session_info['subject'],
                             confidence=int(confidence),
                             time=f"{total_time:.2f}",
@@ -214,11 +233,16 @@ class DynamicFaceVerificationQueue:
                 
                 # Check if it's a missing image error
                 if 'not found' in error_msg.lower() or 'no stored image' in error_msg.lower():
+                    # Get student's actual batch
+                    student_data = task.session_info.get('students', {}).get(task.student_id, {})
+                    student_batch = student_data.get('BatchNo', task.session_info['batch_name'])
+                    if ',' in student_batch:
+                        student_batch = student_batch.split(',')[0].strip()
                     asyncio.run(bot.send_message(
                         chat_id=task.user_id,
                         text=messages.verification('image_not_found',
                             student_id=task.student_id,
-                            batch=task.session_info['batch_name'],
+                            batch=student_batch,
                             request_id=task.request_id
                         )
                     ))
