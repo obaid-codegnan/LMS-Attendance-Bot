@@ -18,7 +18,7 @@ class APIAttendanceService:
     def __init__(self):
         self.api_service = APIService()
     
-    async def _check_existing_attendance(self, batch: str, subject: str) -> bool:
+    async def _check_existing_attendance(self, batch: str, subject: str, teacher_credentials: dict = None) -> bool:
         """Check if attendance record exists for today."""
         try:
             date = datetime.now().strftime("%Y-%m-%d")
@@ -30,24 +30,43 @@ class APIAttendanceService:
                 "userType": "Mentor"
             }
             
-            response = requests.get(url, params=params, timeout=10)
+            # Use teacher credentials if available
+            if teacher_credentials:
+                headers = self.api_service._get_headers(
+                    teacher_credentials.get('username'),
+                    teacher_credentials.get('password')
+                )
+            else:
+                headers = self.api_service._get_headers()
+            
+            response = requests.get(url, params=params, headers=headers, timeout=10)
+            logger.info(f"Checking existing attendance: {response.status_code}")
+            
             if response.status_code == 200:
                 data = response.json()
                 data_list = data.get("data", [])
                 
                 for date_item in data_list:
                     if isinstance(date_item, dict):
+                        # Check both formats
                         if 'dates' in date_item and date in date_item['dates']:
-                            return subject in date_item['dates'][date]
+                            subjects_data = date_item['dates'][date]
+                            exists = subject in subjects_data
+                            logger.info(f"Found attendance record (dates format): {exists}")
+                            return exists
                         elif date in date_item:
-                            return subject in date_item[date]
+                            subjects_data = date_item[date]
+                            exists = subject in subjects_data
+                            logger.info(f"Found attendance record (direct format): {exists}")
+                            return exists
                             
+            logger.info("No existing attendance record found")
             return False
         except Exception as e:
             logger.error(f"Error checking existing attendance: {e}")
             return False
     
-    async def _create_attendance(self, student_id: str, batch: str, subject: str, students: list) -> bool:
+    async def _create_attendance(self, student_id: str, batch: str, subject: str, students: list, teacher_credentials: dict = None) -> bool:
         """Create new attendance record using POST."""
         try:
             attendance_students = []
@@ -68,7 +87,16 @@ class APIAttendanceService:
                 "students": attendance_students
             }
             
-            success = await self.api_service.send_attendance_to_api_async(attendance_data, method="POST")
+            if teacher_credentials:
+                success = await self.api_service.send_attendance_to_api_with_auth_async(
+                    attendance_data, 
+                    method="POST",
+                    username=teacher_credentials['username'],
+                    password=teacher_credentials['password']
+                )
+            else:
+                success = await self.api_service.send_attendance_to_api_async(attendance_data, method="POST")
+            
             logger.info(f"Created attendance record for {batch}/{subject} with {student_id} present")
             return success
             
@@ -76,11 +104,11 @@ class APIAttendanceService:
             logger.error(f"Error creating attendance: {e}")
             return False
     
-    async def _update_attendance(self, student_id: str, batch: str, subject: str, students: list) -> bool:
+    async def _update_attendance(self, student_id: str, batch: str, subject: str, students: list, teacher_credentials: dict = None) -> bool:
         """Update existing attendance record using PUT."""
         try:
             # Get current attendance to preserve existing statuses
-            current_attendance = await self._get_current_attendance(batch, subject)
+            current_attendance = await self._get_current_attendance(batch, subject, teacher_credentials)
             
             attendance_students = []
             for student in students:
@@ -102,7 +130,16 @@ class APIAttendanceService:
                 "students": attendance_students
             }
             
-            success = await self.api_service.send_attendance_to_api_async(attendance_data, method="PUT")
+            if teacher_credentials:
+                success = await self.api_service.send_attendance_to_api_with_auth_async(
+                    attendance_data, 
+                    method="PUT",
+                    username=teacher_credentials['username'],
+                    password=teacher_credentials['password']
+                )
+            else:
+                success = await self.api_service.send_attendance_to_api_async(attendance_data, method="PUT")
+            
             logger.info(f"Updated attendance record for {batch}/{subject} with {student_id} present")
             return success
             
@@ -110,7 +147,7 @@ class APIAttendanceService:
             logger.error(f"Error updating attendance: {e}")
             return False
     
-    async def _get_current_attendance(self, batch: str, subject: str) -> dict:
+    async def _get_current_attendance(self, batch: str, subject: str, teacher_credentials: dict = None) -> dict:
         """Get current attendance statuses."""
         try:
             date = datetime.now().strftime("%Y-%m-%d")
@@ -122,7 +159,16 @@ class APIAttendanceService:
                 "userType": "Mentor"
             }
             
-            response = requests.get(url, params=params, timeout=10)
+            # Use teacher credentials if available
+            if teacher_credentials:
+                headers = self.api_service._get_headers(
+                    teacher_credentials.get('username'),
+                    teacher_credentials.get('password')
+                )
+            else:
+                headers = self.api_service._get_headers()
+            
+            response = requests.get(url, params=params, headers=headers, timeout=10)
             if response.status_code == 200:
                 data = response.json()
                 data_list = data.get("data", [])
@@ -144,27 +190,55 @@ class APIAttendanceService:
             logger.error(f"Error getting current attendance: {e}")
             return {}
     
-    async def mark_student_present_async(self, student_id: str, batch: str, subject: str, mentor_id: str = None) -> bool:
+    async def mark_student_present_async(self, student_id: str, batch: str, subject: str, mentor_id: str = None, teacher_credentials: dict = None) -> bool:
         """Mark student present using POST for first, PUT for subsequent."""
         try:
-            # Check if attendance record exists for this batch/subject today
-            session_key = f"{batch}:{subject}"
+            # Get all students for this session using teacher's credentials
+            if teacher_credentials:
+                logger.info(f"Using teacher credentials: {teacher_credentials.get('username', 'N/A')}")
+                
+                # Authenticate with teacher credentials first
+                auth_success = await self.api_service.authenticate_async(
+                    teacher_credentials['username'], 
+                    teacher_credentials['password']
+                )
+                if not auth_success:
+                    logger.error(f"Failed to authenticate teacher for attendance marking")
+                    return False
+                
+                # Use async executor to call the sync method
+                loop = asyncio.get_event_loop()
+                students = await loop.run_in_executor(
+                    None,
+                    self.api_service.get_students_for_session_with_auth,
+                    batch, subject, 
+                    teacher_credentials['username'], 
+                    teacher_credentials['password']
+                )
+            else:
+                logger.warning("No teacher credentials available, using default authentication")
+                loop = asyncio.get_event_loop()
+                students = await loop.run_in_executor(
+                    None,
+                    self.api_service.get_students_for_session,
+                    batch, subject
+                )
             
-            # Get all students for this session
-            students = self.api_service.get_students_for_session(batch, subject)
             if not students:
                 logger.error(f"No students found for batch {batch}, subject {subject}")
                 return False
             
-            # Check if attendance already exists
-            existing_attendance = await self._check_existing_attendance(batch, subject)
+            # Check if attendance already exists for this batch/subject today
+            existing_attendance = await self._check_existing_attendance(batch, subject, teacher_credentials)
             
             if existing_attendance:
-                # Use PUT to update existing attendance
-                return await self._update_attendance(student_id, batch, subject, students)
+                # Attendance record exists - use PUT to update
+                logger.info(f"Attendance exists for {batch}/{subject} - using PUT method")
+                return await self._update_attendance(student_id, batch, subject, students, teacher_credentials)
             else:
-                # Use POST to create new attendance
-                return await self._create_attendance(student_id, batch, subject, students)
+                # No attendance record - use POST to create first entry
+                logger.info(f"No attendance found for {batch}/{subject} - using POST method (first student)")
+                return await self._create_attendance(student_id, batch, subject, students, teacher_credentials)
                 
         except Exception as e:
             logger.error(f"Error marking student present: {e}")
@@ -186,7 +260,18 @@ class APIAttendanceService:
             }
             
             logger.info(f"Fetching attendance report with params: {params}")
-            response = requests.get(url, params=params, timeout=10)
+            
+            # Use teacher credentials from session if available
+            teacher_credentials = session_data.get('teacher_credentials') if session_data else None
+            if teacher_credentials:
+                headers = self.api_service._get_headers(
+                    teacher_credentials.get('username'),
+                    teacher_credentials.get('password')
+                )
+            else:
+                headers = self.api_service._get_headers()
+            
+            response = requests.get(url, params=params, headers=headers, timeout=10)
             
             if response.status_code == 200:
                 data = response.json()

@@ -4,6 +4,8 @@ Script to check existing data in S3 bucket
 """
 import boto3
 import pandas as pd
+import os
+import tempfile
 from src.config.settings import Config
 
 def check_s3_bucket():
@@ -53,27 +55,29 @@ def check_s3_bucket():
         for key, size, modified in metadata_files:
             print(f"  {key} ({size} bytes, {modified})")
             
-            # Try to download existing Excel file
-            try:
-                response = s3_client.get_object(Bucket=bucket_name, Key=key)
-                file_content = response['Body'].read()
-                
-                # Save to temp file and read with pandas
-                import tempfile
-                with tempfile.NamedTemporaryFile(suffix='.xlsx', delete=False) as tmp_file:
-                    tmp_file.write(file_content)
-                    tmp_path = tmp_file.name
-                
-                df = pd.read_excel(tmp_path, engine='openpyxl')
-                os.unlink(tmp_path)  # Clean up
-                
-                print(f"    Rows: {len(df)}")
-                print(f"    Columns: {list(df.columns)}")
-                if len(df) > 0:
-                    print("    Sample data:")
-                    print(df.head().to_string(index=False))
-            except Exception as e:
-                print(f"    Error reading Excel: {e}")
+            # Try to download existing Excel file (skip empty folders)
+            if size > 0 and key.endswith('.xlsx'):
+                try:
+                    response = s3_client.get_object(Bucket=bucket_name, Key=key)
+                    file_content = response['Body'].read()
+                    
+                    # Save to temp file and read with pandas
+                    with tempfile.NamedTemporaryFile(suffix='.xlsx', delete=False) as tmp_file:
+                        tmp_file.write(file_content)
+                        tmp_path = tmp_file.name
+                    
+                    df = pd.read_excel(tmp_path, engine='openpyxl')
+                    os.unlink(tmp_path)  # Clean up
+                    
+                    print(f"    Rows: {len(df)}")
+                    print(f"    Columns: {list(df.columns)}")
+                    if len(df) > 0:
+                        print("    Sample data:")
+                        print(df.head().to_string(index=False))
+                except Exception as e:
+                    print(f"    Error reading Excel: {e}")
+            elif size == 0:
+                print("    (Empty folder)")
         
         print("\nSTUDENT FOLDERS:")
         for batch, files in student_folders.items():

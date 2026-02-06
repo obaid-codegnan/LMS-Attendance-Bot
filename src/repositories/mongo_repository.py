@@ -50,22 +50,27 @@ class MongoRepository:
                 return None
                 
             # Try exact match first
-            teacher = self.db.teachers.find_one({"phone": phone})
+            teacher = self.db.teachers.find_one({"PhNumber": phone})
             
             if not teacher:
                 # Try without country code
                 clean_phone = phone.replace('+91', '').replace('+', '')
                 teacher = self.db.teachers.find_one({
                     "$or": [
-                        {"phone": clean_phone},
-                        {"phone": f"+91{clean_phone}"},
-                        {"phone": {"$regex": clean_phone}}
+                        {"PhNumber": clean_phone},
+                        {"PhNumber": f"+91{clean_phone}"},
+                        {"PhNumber": {"$regex": clean_phone}}
                     ]
                 })
             
             if teacher:
-                # Convert ObjectId to string
-                teacher['_id'] = str(teacher['_id'])
+                # Convert ObjectId to string if present
+                if '_id' in teacher:
+                    teacher['_id'] = str(teacher['_id'])
+                # Map fields for compatibility
+                teacher['mentor_id'] = teacher.get('id')
+                teacher['api_username'] = teacher.get('email')
+                teacher['api_password'] = teacher.get('password')  # This is hashed, need plain text
                 
             return teacher
             
@@ -116,7 +121,8 @@ class MongoRepository:
                         'batch_name': session.get('batch_name', ''),
                         'subject': session.get('subject', ''),
                         'lat': session.get('lat'),
-                        'long': session.get('long')
+                        'long': session.get('long'),
+                        'teacher_credentials': session.get('teacher_credentials')
                     }
                 }
             else:
@@ -219,24 +225,14 @@ class MongoRepository:
             return None
     
     def update_teacher_telegram_id(self, teacher_id: str, telegram_id: int) -> bool:
-        """Update teacher's telegram ID."""
+        """Update teacher's telegram ID using the 'id' field."""
         try:
             if self.db is None:
                 return False
             
-            try:
-                from bson import ObjectId
-            except ImportError:
-                logger.error("bson not available, using string ID")
-                # Fallback for string IDs
-                result = self.db.teachers.update_one(
-                    {"_id": teacher_id},
-                    {"$set": {"telegram_id": telegram_id}}
-                )
-                return result.modified_count > 0
-                
+            # Update using the 'id' field from your document structure
             result = self.db.teachers.update_one(
-                {"_id": ObjectId(teacher_id)},
+                {"id": teacher_id},
                 {"$set": {"telegram_id": telegram_id}}
             )
             
@@ -279,7 +275,12 @@ class MongoRepository:
             teacher = self.db.teachers.find_one({"telegram_id": telegram_id})
             
             if teacher:
-                teacher['_id'] = str(teacher['_id'])
+                if '_id' in teacher:
+                    teacher['_id'] = str(teacher['_id'])
+                # Map fields for compatibility
+                teacher['mentor_id'] = teacher.get('id')
+                teacher['api_username'] = teacher.get('email')
+                teacher['api_password'] = teacher.get('password')  # This is hashed
                 
             return teacher
             
@@ -444,18 +445,91 @@ class MongoRepository:
             logger.error(f"Error getting batches: {e}")
             return []
     
-    def get_all_subjects(self) -> List[str]:
-        """Get all unique subjects."""
+    def create_session_with_credentials(self, otp: str, lat: float, lng: float, batch_name: str, subject: str, students: dict, teacher_id: str = None, teacher_name: str = None, teacher_telegram_id: int = None, teacher_credentials: dict = None) -> bool:
+        """Create a new session in MongoDB with teacher credentials."""
         try:
             if self.db is None:
-                return []
-            # Get subjects from teachers
-            teachers = self.db.teachers.find({}, {"subjects": 1})
-            subjects = set()
-            for teacher in teachers:
-                if "subjects" in teacher:
-                    subjects.update(teacher["subjects"])
-            return list(subjects)
+                logger.error("MongoDB not connected")
+                return False
+            
+            from datetime import datetime
+            
+            session_data = {
+                'otp': otp,
+                'lat': lat,
+                'lng': lng,
+                'long': lng,  # Store both lng and long for compatibility
+                'batch_name': batch_name,
+                'subject': subject,
+                'students': students,
+                'created_at': datetime.now(),
+                'expires_at': datetime.now().timestamp() + Config.OTP_EXPIRY_SECONDS,
+                'date': datetime.now().strftime("%Y-%m-%d"),
+                'location': 'vijayawada',
+                'teacher_credentials': teacher_credentials  # Store credentials for API calls
+            }
+            
+            # Add teacher info if provided
+            if teacher_id:
+                session_data['teacher_id'] = teacher_id
+            if teacher_name:
+                session_data['teacher_name'] = teacher_name
+            if teacher_telegram_id:
+                session_data['teacher_telegram_id'] = teacher_telegram_id
+            
+            result = self.db.sessions.insert_one(session_data)
+            logger.info(f"Session created with OTP {otp}, ID: {result.inserted_id}")
+            return True
+            
         except Exception as e:
-            logger.error(f"Error getting subjects: {e}")
-            return []
+            logger.error(f"Error creating session: {e}")
+            return False
+        """Save plain text password for teacher."""
+        try:
+            if self.db is None:
+                logger.warning("MongoDB not connected, cannot save password")
+                return False
+            
+            # Update teacher with plain password
+            result = self.db.teachers.update_one(
+                {"id": teacher_id},
+                {"$set": {"plain_password": plain_password}}
+            )
+            
+            logger.info(f"Saved password for teacher {teacher_id}")
+            return result.modified_count > 0
+            
+        except Exception as e:
+            logger.error(f"Error saving teacher password: {e}")
+            return False
+    def save_teacher_credentials(self, telegram_id: int, phone: str, email: str, password: str, name: str = None) -> bool:
+        """Save teacher credentials for future logins."""
+        try:
+            if self.db is None:
+                return False
+            
+            from datetime import datetime
+            
+            teacher_data = {
+                'telegram_id': telegram_id,
+                'phone': phone,
+                'email': email,
+                'plain_password': password,
+                'name': name or 'Teacher',
+                'created_at': datetime.now(),
+                'updated_at': datetime.now()
+            }
+            
+            # Upsert based on telegram_id
+            result = self.db.teachers.update_one(
+                {'telegram_id': telegram_id},
+                {'$set': teacher_data},
+                upsert=True
+            )
+            
+            logger.info(f"Saved credentials for teacher {email} (telegram_id: {telegram_id})")
+            return True
+            
+        except Exception as e:
+            logger.error(f"Error saving teacher credentials: {e}")
+            return False

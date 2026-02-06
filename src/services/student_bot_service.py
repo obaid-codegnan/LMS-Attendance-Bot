@@ -34,7 +34,17 @@ class StudentBotService:
             logger.warning("STUDENT_BOT_TOKEN not set. Student Bot will not start.")
             return
 
-        self.app = ApplicationBuilder().token(self.token).build()
+        # Configure with longer timeouts
+        from telegram.request import HTTPXRequest
+        request = HTTPXRequest(
+            connection_pool_size=8,
+            connect_timeout=30.0,
+            read_timeout=30.0,
+            write_timeout=30.0,
+            pool_timeout=30.0
+        )
+        
+        self.app = ApplicationBuilder().token(self.token).request(request).build()
         self.setup_handlers()
 
     def setup_handlers(self):
@@ -109,6 +119,12 @@ class StudentBotService:
         context.user_data['student'] = validation_result
         context.user_data['session'] = validation_result['session_info']
         
+        # Debug: Log if teacher credentials are available
+        teacher_creds = validation_result['session_info'].get('teacher_credentials')
+        logger.info(f"Teacher credentials available in session: {teacher_creds is not None}")
+        if teacher_creds:
+            logger.info(f"Teacher username: {teacher_creds.get('username', 'N/A')}")
+        
         location_btn = KeyboardButton(text="📍 Share Current Location", request_location=True)
         markup = ReplyKeyboardMarkup([[location_btn]], one_time_keyboard=True, resize_keyboard=True)
         
@@ -122,7 +138,11 @@ class StudentBotService:
         return LOCATION
 
     async def receive_location(self, update: Update, context: ContextTypes.DEFAULT_TYPE):
-        return await self._process_location(update.message.location, update, context)
+        if update.message and update.message.location:
+            return await self._process_location(update.message.location, update, context)
+        else:
+            await update.message.reply_text("❌ Location not received. Please try sharing your location again.")
+            return LOCATION
 
     async def receive_location_text(self, update: Update, context: ContextTypes.DEFAULT_TYPE):
         try:
@@ -197,8 +217,7 @@ class StudentBotService:
         
         # Immediate acknowledgment - no delays!
         await update.message.reply_text(
-            f"✅ **Video received!** (ID: {request_id})\n"
-            f"🚀 **Added to processing queue**\n\n"
+            f"✅Attendance Processing\n\n"
             f"You will receive confirmation shortly."
         )
         
@@ -217,7 +236,8 @@ class StudentBotService:
                 batch_name=session['batch_name'],
                 session_info=session,
                 user_id=update.effective_user.id,
-                timestamp=time.time()
+                timestamp=time.time(),
+                teacher_credentials=session.get('teacher_credentials')
             )
             
             success = face_queue.add_task(task)

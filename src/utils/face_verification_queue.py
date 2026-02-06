@@ -23,6 +23,7 @@ class VerificationTask:
     session_info: dict
     user_id: int
     timestamp: float
+    teacher_credentials: dict = None
 
 class DynamicFaceVerificationQueue:
     _instance = None
@@ -143,6 +144,9 @@ class DynamicFaceVerificationQueue:
             bot = Bot(token=Config.STUDENT_BOT_TOKEN)
             
             logger.info(f"[{task.request_id}] Processing verification for {task.student_id}")
+            logger.debug(f"[{task.request_id}] Teacher credentials available: {task.teacher_credentials is not None}")
+            if task.teacher_credentials:
+                logger.debug(f"[{task.request_id}] Using credentials for: {task.teacher_credentials.get('username', 'N/A')}")
             
             # Step 1: Face verification with timing
             face_start = time.time()
@@ -159,7 +163,8 @@ class DynamicFaceVerificationQueue:
                 success = asyncio.run(attendance_service.mark_student_present_async(
                     student_id=task.student_id,
                     batch=task.session_info['batch_name'],
-                    subject=task.session_info['subject']
+                    subject=task.session_info['subject'],
+                    teacher_credentials=task.teacher_credentials
                 ))
                 api_time = time.time() - api_start
                 
@@ -173,7 +178,7 @@ class DynamicFaceVerificationQueue:
                     asyncio.run(bot.send_message(
                         chat_id=task.user_id,
                         text=(
-                            f"✅ **Face Verified!** (Confidence: {confidence:.1f}%)\n"
+                            f"✅ **Face Verified!**\n"
                             f"✅ **Attendance Marked Successfully!**\n\n"
                             f"📊 **Session Details:**\n"
                             f"   • Student: {task.student_id}\n"
