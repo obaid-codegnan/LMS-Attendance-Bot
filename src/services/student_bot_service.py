@@ -17,6 +17,7 @@ from geopy.distance import geodesic
 from src.repositories.mongo_repository import MongoRepository
 from src.services.api_attendance_service import APIAttendanceService
 from src.config.settings import Config
+from src.utils.bot_messages import messages
 
 logger = logging.getLogger(__name__)
 
@@ -74,8 +75,7 @@ class StudentBotService:
         logger.info(f"Student Bot: /start from {update.effective_user.id}")
 
         await update.message.reply_text(
-            "👨🎓 **Welcome Student!**\n"
-            "Please enter your **Student ID** to mark attendance:",
+            messages.student('welcome'),
             parse_mode='Markdown'
         )
         return ID
@@ -84,22 +84,22 @@ class StudentBotService:
         student_id = update.message.text.strip()
         
         if not student_id or len(student_id) > 50:
-            await update.message.reply_text("❌ Invalid Student ID. Please enter a valid ID.")
+            await update.message.reply_text(messages.student('invalid_id'))
             return ID
             
         if not student_id.replace('_', '').replace('-', '').isalnum():
-            await update.message.reply_text("❌ Student ID can only contain letters, numbers, hyphens, and underscores.")
+            await update.message.reply_text(messages.student('invalid_id_format'))
             return ID
         
         context.user_data['student_id'] = student_id
-        await update.message.reply_text("✅ **Student ID received!**\nEnter **Class OTP**:", parse_mode='Markdown')
+        await update.message.reply_text(messages.student('id_received'), parse_mode='Markdown')
         return OTP
 
     async def receive_otp(self, update: Update, context: ContextTypes.DEFAULT_TYPE):
         otp = update.message.text.strip()
         
         if not otp.isdigit() or len(otp) != 6:
-            await update.message.reply_text("❌ Invalid OTP format. Please enter a 6-digit OTP.")
+            await update.message.reply_text(messages.student('invalid_otp'))
             return OTP
         
         student_id = context.user_data['student_id']
@@ -109,8 +109,7 @@ class StudentBotService:
         
         if not validation_result:
             await update.message.reply_text(
-                f"❌ Student ID '{student_id}' not found in this session or session expired.\n"
-                f"Please check your Student ID and OTP.",
+                messages.student('student_not_found', student_id=student_id),
                 reply_markup=ReplyKeyboardRemove()
             )
             return ConversationHandler.END
@@ -129,9 +128,10 @@ class StudentBotService:
         markup = ReplyKeyboardMarkup([[location_btn]], one_time_keyboard=True, resize_keyboard=True)
         
         await update.message.reply_text(
-            f"✅ Welcome **{validation_result['name']}**!\n"
-            f"🏫 Batch: {validation_result['batch']}\n\n"
-            f"📍 Please share your **current location** to verify you're in class:", 
+            messages.student('welcome_student', 
+                name=validation_result['name'],
+                batch=validation_result['batch']
+            ), 
             reply_markup=markup,
             parse_mode='Markdown'
         )
@@ -141,7 +141,7 @@ class StudentBotService:
         if update.message and update.message.location:
             return await self._process_location(update.message.location, update, context)
         else:
-            await update.message.reply_text("❌ Location not received. Please try sharing your location again.")
+            await update.message.reply_text(messages.student('location_not_received'))
             return LOCATION
 
     async def receive_location_text(self, update: Update, context: ContextTypes.DEFAULT_TYPE):
@@ -153,26 +153,26 @@ class StudentBotService:
                 longitude = lng
             return await self._process_location(MockLoc(), update, context)
         except:
-            await update.message.reply_text("Invalid format. Use button or 'lat,long'.")
+            await update.message.reply_text(messages.student('invalid_location_format'))
             return LOCATION
 
     async def _process_location(self, user_loc, update: Update, context: ContextTypes.DEFAULT_TYPE):
         session = context.user_data.get('session')
         if not session:
-             await update.message.reply_text("❌ Session expired. Please start again with /start")
+             await update.message.reply_text(messages.student('session_expired'))
              return ConversationHandler.END
 
         try:
             # Validate session location data
             if session.get('lat') is None or session.get('long') is None:
                 logger.error(f"Session location data is None: lat={session.get('lat')}, long={session.get('long')}")
-                await update.message.reply_text("❌ Session location not available. Please contact teacher.")
+                await update.message.reply_text(messages.student('session_location_error'))
                 return ConversationHandler.END
             
             # Validate user location data
             if user_loc is None or user_loc.latitude is None or user_loc.longitude is None:
                 logger.error(f"User location data is None: {user_loc}")
-                await update.message.reply_text("❌ Location data not received. Please try sharing location again.")
+                await update.message.reply_text(messages.student('location_not_received'))
                 return LOCATION
             
             class_lat = float(session['lat'])
@@ -186,18 +186,21 @@ class StudentBotService:
             logger.error(f"Location processing error: {e}")
             logger.error(f"Session data: {session}")
             logger.error(f"User location: lat={getattr(user_loc, 'latitude', None)}, lng={getattr(user_loc, 'longitude', None)}")
-            await update.message.reply_text("❌ Error processing location. Please try again.")
+            await update.message.reply_text(messages.student('location_error'))
             return LOCATION
         
         if dist > Config.LOCATION_DISTANCE_LIMIT_METERS: 
             await update.message.reply_text(
-                f"❌ Too far ({int(dist)}m). Limit: {Config.LOCATION_DISTANCE_LIMIT_METERS}m.\nYou must be in the class.", 
+                messages.student('too_far', 
+                    distance=int(dist), 
+                    limit=Config.LOCATION_DISTANCE_LIMIT_METERS
+                ), 
                 reply_markup=ReplyKeyboardRemove()
             )
             return LOCATION
             
         await update.message.reply_text(
-            "📍 Location Verified!\n📸 Record a **Video Note** (Circle Video) of your face.\n_(Tap mic icon to switch to video note)_",
+            messages.student('location_verified'),
             reply_markup=ReplyKeyboardRemove(),
             parse_mode='Markdown'
         )
@@ -216,10 +219,7 @@ class StudentBotService:
         logger.info(f"[{request_id}] Video received from {student_id}")
         
         # Immediate acknowledgment - no delays!
-        await update.message.reply_text(
-            f"✅Attendance Processing\n\n"
-            f"You will receive confirmation shortly."
-        )
+        await update.message.reply_text(messages.student('processing'))
         
         try:
             # Download video bytes once
@@ -248,30 +248,24 @@ class StudentBotService:
                 
                 
             else:
-                await update.message.reply_text(
-                    f"❌ **Queue is full. Please try again in a moment.**\n"
-                    f"_Process ID: {request_id}_"
-                )
+                await update.message.reply_text(messages.student('queue_full', request_id=request_id))
                 
         except Exception as e:
             logger.error(f"[{request_id}] Error queuing task for {student_id}: {e}")
-            await update.message.reply_text(
-                f"❌ **Error processing video. Please try again.**\n"
-                f"_Process ID: {request_id}_"
-            )
+            await update.message.reply_text(messages.student('processing_error', request_id=request_id))
         
         return ConversationHandler.END
 
     async def receive_photo(self, update: Update, context: ContextTypes.DEFAULT_TYPE):
-        await update.message.reply_text("❌ Please send a **Video Note** (Circle), not a photo.")
+        await update.message.reply_text(messages.student('wrong_media_photo'))
         return SELFIE
 
     async def handle_wrong_video_type(self, update: Update, context: ContextTypes.DEFAULT_TYPE):
-        await update.message.reply_text("❌ Please record a **Video Note** (the circular one).")
+        await update.message.reply_text(messages.student('wrong_media_video'))
         return SELFIE
 
     async def cancel(self, update: Update, context: ContextTypes.DEFAULT_TYPE):
-        await update.message.reply_text("🚫 Cancelled.", reply_markup=ReplyKeyboardRemove())
+        await update.message.reply_text(messages.student('cancelled'), reply_markup=ReplyKeyboardRemove())
         return ConversationHandler.END
 
     def run_polling(self):

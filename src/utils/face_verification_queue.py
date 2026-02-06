@@ -11,6 +11,7 @@ from dataclasses import dataclass
 from queue import Queue, Empty
 from typing import Dict, Optional
 from src.config.settings import Config
+from src.utils.bot_messages import messages
 
 logger = logging.getLogger(__name__)
 
@@ -160,13 +161,23 @@ class DynamicFaceVerificationQueue:
                 
                 # Step 2: Mark attendance with timing
                 api_start = time.time()
-                success = asyncio.run(attendance_service.mark_student_present_async(
-                    student_id=task.student_id,
-                    batch=task.session_info['batch_name'],
-                    subject=task.session_info['subject'],
-                    teacher_credentials=task.teacher_credentials
-                ))
+                logger.info(f"[{task.request_id}] Marking attendance for {task.student_id} in {task.session_info['batch_name']}/{task.session_info['subject']}")
+                
+                try:
+                    success = asyncio.run(attendance_service.mark_student_present_async(
+                        student_id=task.student_id,
+                        batch=task.session_info['batch_name'],
+                        subject=task.session_info['subject'],
+                        teacher_credentials=task.teacher_credentials
+                    ))
+                except Exception as attendance_error:
+                    logger.error(f"[{task.request_id}] Attendance marking exception: {attendance_error}")
+                    import traceback
+                    logger.error(f"[{task.request_id}] Traceback: {traceback.format_exc()}")
+                    success = False
+                    
                 api_time = time.time() - api_start
+                logger.info(f"[{task.request_id}] Attendance marking result: {success} (took {api_time:.2f}s)")
                 
                 # Step 3: Send response with timing
                 response_start = time.time()
@@ -177,14 +188,13 @@ class DynamicFaceVerificationQueue:
                     # Send success message
                     asyncio.run(bot.send_message(
                         chat_id=task.user_id,
-                        text=(
-                            f"✅ **Face Verified!**\n"
-                            f"✅ **Attendance Marked Successfully!**\n\n"
-                            f"📊 **Session Details:**\n"
-                            f"   • Student: {task.student_id}\n"
-                            f"   • Subject: {task.session_info['subject']}\n"
-                            f"   • Batch: {task.session_info['batch_name']}\n\n"
-                            f"✅ **Your attendance has been recorded!**"
+                        text=messages.verification('success',
+                            student_id=task.student_id,
+                            batch=task.session_info['batch_name'],
+                            subject=task.session_info['subject'],
+                            confidence=int(confidence),
+                            time=f"{total_time:.2f}",
+                            request_id=task.request_id
                         )
                     ))
                     response_time = time.time() - response_start
@@ -193,18 +203,35 @@ class DynamicFaceVerificationQueue:
                 else:
                     asyncio.run(bot.send_message(
                         chat_id=task.user_id,
-                        text=f"❌ Face verified but failed to record attendance. Contact teacher. (ID: {task.request_id})"
+                        text=messages.verification('api_error',
+                            student_id=task.student_id,
+                            error="Failed to record attendance",
+                            request_id=task.request_id
+                        )
                     ))
             else:
                 error_msg = verification_result.get('error', 'Face verification failed')
-                asyncio.run(bot.send_message(
-                    chat_id=task.user_id,
-                    text=(
-                        f"❌ **Verification failed**\n"
-                        f"📸 Please try again with clear face visibility.\n"
-                        f"_Process ID: {task.request_id}_"
-                    )
-                ))
+                
+                # Check if it's a missing image error
+                if 'not found' in error_msg.lower() or 'no stored image' in error_msg.lower():
+                    asyncio.run(bot.send_message(
+                        chat_id=task.user_id,
+                        text=messages.verification('image_not_found',
+                            student_id=task.student_id,
+                            batch=task.session_info['batch_name'],
+                            request_id=task.request_id
+                        )
+                    ))
+                else:
+                    asyncio.run(bot.send_message(
+                        chat_id=task.user_id,
+                        text=messages.verification('face_not_match',
+                            student_id=task.student_id,
+                            confidence=int(verification_result.get('confidence', 0)),
+                            threshold=Config.FACE_MATCH_THRESHOLD,
+                            request_id=task.request_id
+                        )
+                    ))
                 logger.warning(f"[{task.request_id}] FAILED: {task.student_id} - {error_msg} (Face: {face_time:.2f}s)")
                 
         except Exception as e:
@@ -215,7 +242,11 @@ class DynamicFaceVerificationQueue:
                 bot = Bot(token=Config.STUDENT_BOT_TOKEN)
                 asyncio.run(bot.send_message(
                     chat_id=task.user_id,
-                    text=f"❌ Technical error occurred. Please try again. (ID: {task.request_id})"
+                    text=messages.verification('processing_error',
+                        student_id=task.student_id,
+                        error=str(e),
+                        request_id=task.request_id
+                    )
                 ))
             except:
                 pass

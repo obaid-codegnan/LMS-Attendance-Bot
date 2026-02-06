@@ -311,7 +311,7 @@ class FaceRecognitionService:
             return {"success": False, "error": f"Comparison failed: {str(e)}"}
     
     def _find_student_image_in_s3(self, student_id: str, batch_name: str = None, request_id: str = None) -> tuple:
-        """Ultra-fast S3 image lookup with direct path access."""
+        """Ultra-fast S3 image lookup with direct path access - handles multi-batch sessions."""
         try:
             # Check cache first
             cache_key = f"{batch_name}_{student_id}" if batch_name else student_id
@@ -322,24 +322,33 @@ class FaceRecognitionService:
             # Create isolated S3 client for this request
             s3_client = self._get_s3_client()
             
-            # Direct path using batch name and student ID
+            # Handle multi-batch sessions (e.g., "PFS-VIJ-021, PFS-VIJ-020")
             if batch_name:
-                s3_key = f"students/{batch_name}/{student_id}.jpg"
-                try:
-                    response = s3_client.get_object(Bucket=self.s3_bucket, Key=s3_key)
-                    stored_image_bytes = response['Body'].read()
-                    
-                    # Cache the result
-                    if len(self._image_cache) >= self._cache_max_size:
-                        # Remove oldest entry
-                        oldest_key = next(iter(self._image_cache))
-                        del self._image_cache[oldest_key]
-                    
-                    self._image_cache[cache_key] = (stored_image_bytes, s3_key)
-                    logger.info(f"[{request_id}] Found: {s3_key}")
-                    return stored_image_bytes, s3_key
-                except Exception as e:
-                    logger.error(f"[{request_id}] Student {student_id} not found at {s3_key}: {e}")
+                # Split by comma and try each batch
+                batches = [b.strip() for b in batch_name.split(',')]
+                
+                for batch in batches:
+                    s3_key = f"students/{batch}/{student_id}.jpg"
+                    try:
+                        response = s3_client.get_object(Bucket=self.s3_bucket, Key=s3_key)
+                        stored_image_bytes = response['Body'].read()
+                        
+                        # Cache the result
+                        if len(self._image_cache) >= self._cache_max_size:
+                            # Remove oldest entry
+                            oldest_key = next(iter(self._image_cache))
+                            del self._image_cache[oldest_key]
+                        
+                        self._image_cache[cache_key] = (stored_image_bytes, s3_key)
+                        logger.info(f"[{request_id}] Found: {s3_key}")
+                        return stored_image_bytes, s3_key
+                    except Exception as e:
+                        # Try next batch
+                        logger.debug(f"[{request_id}] Student {student_id} not found in {batch}, trying next batch")
+                        continue
+                
+                # If we get here, student not found in any batch
+                logger.error(f"[{request_id}] Student {student_id} not found in any batch: {batch_name}")
             
             logger.error(f"[{request_id}] No batch name or student {student_id} not found")
             return None, None

@@ -28,6 +28,7 @@ from src.repositories.mongo_repository import MongoRepository
 from src.services.api_attendance_service import APIAttendanceService
 from src.utils.string_utils import sanitize_batch_name
 from src.config.settings import Config
+from src.utils.bot_messages import messages
 
 logger = logging.getLogger(__name__)
 
@@ -94,7 +95,7 @@ class TeacherBotService:
             context.user_data['api_password'] = teacher.get('plain_password')
             
             await update.message.reply_text(
-                f"👋 Welcome back, **{teacher.get('name', 'Teacher')}**!\n🔄 Loading your batches...",
+                messages.teacher('welcome_back', name=teacher.get('name', 'Teacher')),
                 parse_mode='Markdown'
             )
             
@@ -105,8 +106,7 @@ class TeacherBotService:
         markup = ReplyKeyboardMarkup([[contact_btn]], one_time_keyboard=True, resize_keyboard=True)
         
         await update.message.reply_text(
-            f"👋 Welcome, **{user.first_name or 'Teacher'}**!\n\n"
-            f"📱 Please share your contact to verify your identity:",
+            messages.teacher('welcome', name=user.first_name or 'Teacher'),
             parse_mode='Markdown',
             reply_markup=markup
         )
@@ -131,7 +131,7 @@ class TeacherBotService:
         
         if not batch_subject_map:
             await update.message.reply_text(
-                "❌ No pending attendance found for your account.",
+                messages.teacher('no_attendance'),
                 reply_markup=ReplyKeyboardRemove()
             )
             return ConversationHandler.END
@@ -145,7 +145,7 @@ class TeacherBotService:
         
         markup = self._get_batch_markup(available_batches, [])
         await update.message.reply_text(
-            f"📚 **Select Batches**:", 
+            messages.teacher('select_batches'), 
             parse_mode='Markdown', 
             reply_markup=markup
         )
@@ -155,7 +155,7 @@ class TeacherBotService:
         teacher = context.user_data.get('teacher')
         
         if not teacher:
-            await update.message.reply_text("❌ Session expired. Please start again with /start")
+            await update.message.reply_text(messages.teacher('session_expired'))
             return ConversationHandler.END
         
         # Test credentials
@@ -163,7 +163,7 @@ class TeacherBotService:
         context.user_data['api_username'] = username
         context.user_data['api_password'] = password
         
-        await update.message.reply_text("🔄 Verifying credentials and loading batches...")
+        await update.message.reply_text(messages.teacher('loading_batches'))
         
         from src.services.api_service import APIService
         api_service = APIService()
@@ -175,10 +175,7 @@ class TeacherBotService:
         )
         
         if not batch_subject_map:
-            await update.message.reply_text(
-                "❌ Invalid password or no pending attendance found.\n"
-                "Please check your password and try again."
-            )
+            await update.message.reply_text(messages.teacher('invalid_password'))
             return PASSWORD
         
         # Save password to MongoDB for future use
@@ -196,7 +193,7 @@ class TeacherBotService:
         
         markup = self._get_batch_markup(available_batches, [])
         await update.message.reply_text(
-            f"✅ Password saved! Welcome **{teacher.get('name')}**!\n📚 **Select Batches**:", 
+            messages.teacher('password_saved', name=teacher.get('name')), 
             parse_mode='Markdown', 
             reply_markup=markup
         )
@@ -208,7 +205,7 @@ class TeacherBotService:
         phone = context.user_data.get('phone')
         
         if not phone:
-            await update.message.reply_text("❌ Session expired. Please start again with /start")
+            await update.message.reply_text(messages.teacher('session_expired'))
             return ConversationHandler.END
         
         # Ask for username (email)
@@ -216,9 +213,7 @@ class TeacherBotService:
             context.user_data['api_password'] = password
             context.user_data['username_requested'] = True
             
-            await update.message.reply_text(
-                "📧 Please enter your email/username:"
-            )
+            await update.message.reply_text(messages.teacher('email_prompt'))
             return PASSWORD
         
         # Now we have both username and password
@@ -228,7 +223,7 @@ class TeacherBotService:
         context.user_data['api_username'] = username
         context.user_data['api_password'] = actual_password
         
-        await update.message.reply_text("🔄 Verifying credentials via API...")
+        await update.message.reply_text(messages.teacher('loading_batches'))
         
         from src.services.api_service import APIService
         api_service = APIService()
@@ -245,8 +240,7 @@ class TeacherBotService:
         
         if not batch_subject_map:
             await update.message.reply_text(
-                f"❌ Authentication successful but no pending attendance found for {username}.\n"
-                f"Please check with admin or try again later."
+                messages.teacher('auth_failed', username=username)
             )
             return ConversationHandler.END
         
@@ -278,7 +272,7 @@ class TeacherBotService:
         
         markup = self._get_batch_markup(available_batches, [])
         await update.message.reply_text(
-            f"✅ Welcome **{username}**!\n📚 **Select Batches**:", 
+            messages.teacher('auth_success', username=username), 
             parse_mode='Markdown', 
             reply_markup=markup
         )
@@ -287,9 +281,7 @@ class TeacherBotService:
     async def handle_phone_verification(self, update: Update, context: ContextTypes.DEFAULT_TYPE):
         """Handle phone number verification using API."""
         if not update.message.contact:
-            await update.message.reply_text(
-                "❌ Please use the 'Share Contact' button to verify your identity."
-            )
+            await update.message.reply_text(messages.teacher('use_share_button'))
             return CREDENTIALS
         
         phone = update.message.contact.phone_number
@@ -304,8 +296,7 @@ class TeacherBotService:
         context.user_data['phone'] = phone
         
         await update.message.reply_text(
-            f"📱 Phone: {phone}\n\n"
-            f"🔐 Please enter your login password to verify your identity:",
+            messages.teacher('phone_verified', phone=phone),
             parse_mode='Markdown',
             reply_markup=ReplyKeyboardRemove()
         )
@@ -496,7 +487,11 @@ class TeacherBotService:
             markup = ReplyKeyboardMarkup(keyboard, one_time_keyboard=True, resize_keyboard=True)
             
             # Send new message because we are moving from inline to reply keyboard
-            await query.message.reply_text(f"Selected: *{batch_str}*\n📖 **Select Subject**:", parse_mode='Markdown', reply_markup=markup)
+            await query.message.reply_text(
+                messages.teacher('select_subject', batch=batch_str), 
+                parse_mode='Markdown', 
+                reply_markup=markup
+            )
             return SUBJECT
         
         elif data.startswith("TOGGLE_"):
@@ -528,7 +523,7 @@ class TeacherBotService:
         assigned_subjects = list(available_subjects)
         
         if subject not in assigned_subjects:
-            await update.message.reply_text("❌ Invalid subject. Please select from the keyboard.")
+            await update.message.reply_text(messages.teacher('invalid_subject'))
             return SUBJECT
         
         # Check if session already exists for this teacher, batch, and subject today
@@ -539,8 +534,7 @@ class TeacherBotService:
         
         if existing_session:
             await update.message.reply_text(
-                f"❌ Session already exists for {subject} in {batch_str} today.\n"
-                f"Please wait for the current session to complete or contact admin.",
+                messages.teacher('session_exists', subject=subject, batch=batch_str),
                 reply_markup=ReplyKeyboardRemove()
             )
             return ConversationHandler.END
@@ -551,7 +545,7 @@ class TeacherBotService:
         markup = ReplyKeyboardMarkup([[location_btn]], one_time_keyboard=True, resize_keyboard=True)
         
         await update.message.reply_text(
-            f"Subject: *{subject}*\n📍 **Share your Live Location** to start the session:",
+            messages.teacher('share_location', subject=subject),
             parse_mode='Markdown',
             reply_markup=markup
         )
@@ -577,7 +571,7 @@ class TeacherBotService:
         selected_batches = batch_str.split(', ')
         
         # Send loading message
-        loading_msg = await update.message.reply_text("🔄 Creating session and fetching students...")
+        loading_msg = await update.message.reply_text(messages.teacher('creating_session'))
         
         # Fetch students for all batches concurrently using teacher's credentials
         loop = asyncio.get_event_loop()
@@ -617,7 +611,7 @@ class TeacherBotService:
         
         if not all_students:
             await update.message.reply_text(
-                f"❌ No students found for {batch_str} - {subject}. Please contact admin.",
+                messages.teacher('no_students', batch=batch_str, subject=subject),
                 reply_markup=ReplyKeyboardRemove()
             )
             return ConversationHandler.END
@@ -669,13 +663,13 @@ class TeacherBotService:
         ))
         
         await update.message.reply_text(
-            f"✅ Session Created!\n\n"
-            f"📋 Class OTP: {otp}\n"
-            f"📚 Batches: {batch_str}\n"
-            f"📖 Subject: {subject}\n"
-            f"👥 Students: {len(all_students)}\n"
-            f"⏰ Valid for: {Config.OTP_EXPIRY_SECONDS // 60} minutes\n\n"
-            f"Share this OTP with students to mark attendance.",
+            messages.teacher('session_created', 
+                otp=otp, 
+                batch=batch_str, 
+                subject=subject, 
+                count=len(all_students),
+                minutes=Config.OTP_EXPIRY_SECONDS // 60
+            ),
             reply_markup=ReplyKeyboardRemove()
         )
         
@@ -755,28 +749,20 @@ class TeacherBotService:
         present_list = "\n".join([f"✅ {student}" for student in report['present']]) or "None"
         absent_list = "\n".join([f"❌ {student}" for student in report['absent']]) or "None"
         
-        return f"""📊 Attendance Report
-
-📚 Batch: {session_data['batch_name']}
-📖 Subject: {session_data['subject']}
-📅 Date: {report['date']}
-
-👥 Summary:
-• Total Students: {report['total']}
-• Present: {len(report['present'])}
-• Absent: {len(report['absent'])}
-
-✅ Present Students:
-{present_list}
-
-❌ Absent Students:
-{absent_list}
-
-⏰ Session completed automatically."""
+        return messages.teacher('attendance_report',
+            batch=session_data['batch_name'],
+            subject=session_data['subject'],
+            date=report['date'],
+            total=report['total'],
+            present_count=len(report['present']),
+            absent_count=len(report['absent']),
+            present_list=present_list,
+            absent_list=absent_list
+        )
     
     async def cancel(self, update: Update, context: ContextTypes.DEFAULT_TYPE):
         """Cancel conversation."""
-        await update.message.reply_text("🚫 Cancelled.", reply_markup=ReplyKeyboardRemove())
+        await update.message.reply_text(messages.teacher('cancelled'), reply_markup=ReplyKeyboardRemove())
         return ConversationHandler.END
     
     def run_polling(self):

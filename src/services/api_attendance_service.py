@@ -107,19 +107,22 @@ class APIAttendanceService:
     async def _update_attendance(self, student_id: str, batch: str, subject: str, students: list, teacher_credentials: dict = None) -> bool:
         """Update existing attendance record using PUT."""
         try:
+            # Small delay to avoid race conditions
+            await asyncio.sleep(0.5)
+            
             # Get current attendance to preserve existing statuses
             current_attendance = await self._get_current_attendance(batch, subject, teacher_credentials)
+            logger.info(f"Updating for {student_id}: Current has {sum(1 for s in current_attendance.values() if s == 1)} present")
             
             attendance_students = []
             for student in students:
                 sid = student.get('studentId')
-                # Keep existing status or mark new student present
                 existing_status = current_attendance.get(sid, 0)
                 status = 1 if (sid == student_id or existing_status == 1) else 0
-                attendance_students.append({
-                    "studentId": sid,
-                    "status": status
-                })
+                attendance_students.append({"studentId": sid, "status": status})
+            
+            present_count = sum(1 for s in attendance_students if s['status'] == 1)
+            logger.info(f"Sending PUT with {present_count} present (adding {student_id})")
             
             attendance_data = {
                 "subject": subject,
@@ -132,15 +135,14 @@ class APIAttendanceService:
             
             if teacher_credentials:
                 success = await self.api_service.send_attendance_to_api_with_auth_async(
-                    attendance_data, 
-                    method="PUT",
+                    attendance_data, method="PUT",
                     username=teacher_credentials['username'],
                     password=teacher_credentials['password']
                 )
             else:
                 success = await self.api_service.send_attendance_to_api_async(attendance_data, method="PUT")
             
-            logger.info(f"Updated attendance record for {batch}/{subject} with {student_id} present")
+            logger.info(f"Updated {batch}/{subject} with {student_id} present")
             return success
             
         except Exception as e:
@@ -169,6 +171,8 @@ class APIAttendanceService:
                 headers = self.api_service._get_headers()
             
             response = requests.get(url, params=params, headers=headers, timeout=10)
+            logger.info(f"Getting current attendance: {response.status_code}")
+            
             if response.status_code == 200:
                 data = response.json()
                 data_list = data.get("data", [])
@@ -183,8 +187,12 @@ class APIAttendanceService:
                         
                         if subjects_data and subject in subjects_data:
                             students = subjects_data[subject].get("students", [])
-                            return {s.get("studentId"): s.get("status", 0) for s in students}
+                            attendance_dict = {s.get("studentId"): s.get("status", 0) for s in students}
+                            logger.info(f"Current attendance has {len(attendance_dict)} students, {sum(1 for s in attendance_dict.values() if s == 1)} present")
+                            logger.debug(f"Present students: {[sid for sid, status in attendance_dict.items() if status == 1]}")
+                            return attendance_dict
             
+            logger.warning("No current attendance found - returning empty dict")
             return {}
         except Exception as e:
             logger.error(f"Error getting current attendance: {e}")
