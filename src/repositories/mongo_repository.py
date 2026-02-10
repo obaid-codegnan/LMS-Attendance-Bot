@@ -30,7 +30,15 @@ class MongoRepository:
                 logger.error("pymongo not installed. Install with: pip install pymongo")
                 return
                 
-            self.client = MongoClient(Config.MONGODB_URI, serverSelectionTimeoutMS=5000)
+            self.client = MongoClient(
+                Config.MONGODB_URI,
+                serverSelectionTimeoutMS=5000,
+                maxPoolSize=50,
+                minPoolSize=10,
+                maxIdleTimeMS=30000,
+                retryWrites=True,
+                retryReads=True
+            )
             self.db = self.client[Config.MONGODB_DATABASE]
             
             # Test connection
@@ -133,155 +141,32 @@ class MongoRepository:
         except Exception as e:
             logger.error(f"Error validating student {student_id} for session {otp}: {e}")
             return None
-    def create_session(self, otp: str, lat: float, lng: float, batch_name: str, subject: str, students: dict, teacher_id: str = None, teacher_name: str = None, teacher_telegram_id: int = None) -> bool:
-        """Create a new session in MongoDB."""
-        try:
-            if self.db is None:
-                logger.error("MongoDB not connected")
-                return False
-            
-            from datetime import datetime
-            
-            session_data = {
-                'otp': otp,
-                'lat': lat,
-                'lng': lng,
-                'long': lng,  # Store both lng and long for compatibility
-                'batch_name': batch_name,
-                'subject': subject,
-                'students': students,
-                'created_at': datetime.now(),
-                'expires_at': datetime.now().timestamp() + Config.OTP_EXPIRY_SECONDS,
-                'date': datetime.now().strftime("%Y-%m-%d"),
-                'location': 'vijayawada'
-            }
-            
-            # Add teacher info if provided
-            if teacher_id:
-                session_data['teacher_id'] = teacher_id
-            if teacher_name:
-                session_data['teacher_name'] = teacher_name
-            if teacher_telegram_id:
-                session_data['teacher_telegram_id'] = teacher_telegram_id
-            
-            result = self.db.sessions.insert_one(session_data)
-            logger.info(f"Session created with OTP {otp}, ID: {result.inserted_id}")
-            return True
-            
-        except Exception as e:
-            logger.error(f"Error creating session: {e}")
-            return False
-    
-    def get_students_by_batch(self, batch_no: str) -> List[Dict[str, Any]]:
-        try:
-            # Check cache first
-            from src.utils.memory_cache import get_student_cache
-            cache = get_student_cache()
-            cache_key = f"batch_{batch_no}"
-            
-            cached_students = cache.get(cache_key)
-            if cached_students:
-                return cached_students
-            
-            if self.db is None:
-                return []
-            
-            # Try multiple field names for batch
-            students = list(self.db.students.find({
-                "$or": [
-                    {"BatchNo": batch_no},
-                    {"batch": batch_no},
-                    {"batchNo": batch_no}
-                ]
-            }))
-            
-            # Convert ObjectIds to strings
-            for student in students:
-                student['_id'] = str(student['_id'])
-            
-            # Cache for 5 minutes
-            cache.set(cache_key, students, ttl_seconds=300)
-                
-            return students
-            
-        except Exception as e:
-            logger.error(f"Error getting students by batch: {e}")
-            return []
-    
-    def get_student_by_id(self, student_id: str) -> Optional[Dict[str, Any]]:
-        """Get student by student ID."""
-        try:
-            if self.db is None:
-                return None
-                
-            student = self.db.students.find_one({"studentId": student_id})
-            
-            if student:
-                student['_id'] = str(student['_id'])
-                
-            return student
-            
-        except Exception as e:
-            logger.error(f"Error getting student by ID: {e}")
-            return None
-    
-    def update_teacher_telegram_id(self, teacher_id: str, telegram_id: int) -> bool:
-        """Update teacher's telegram ID using the 'id' field."""
-        try:
-            if self.db is None:
-                return False
-            
-            # Update using the 'id' field from your document structure
-            result = self.db.teachers.update_one(
-                {"id": teacher_id},
-                {"$set": {"telegram_id": telegram_id}}
-            )
-            
-            return result.modified_count > 0
-            
-        except Exception as e:
-            logger.error(f"Error updating teacher telegram ID: {e}")
-            return False
-    
-    def remove_time_restrictions_from_teachers(self) -> bool:
-        """Remove time restriction fields from all teachers."""
-        try:
-            if self.db is None:
-                return False
-            
-            # Remove time restriction related fields
-            result = self.db.teachers.update_many(
-                {},
-                {"$unset": {
-                    "time_restrictions": "",
-                    "working_hours": "",
-                    "schedule": "",
-                    "availability": ""
-                }}
-            )
-            
-            logger.info(f"Removed time restrictions from {result.modified_count} teachers")
-            return True
-            
-        except Exception as e:
-            logger.error(f"Error removing time restrictions: {e}")
-            return False
     
     def get_teacher_by_telegram_id(self, telegram_id: int) -> Optional[Dict[str, Any]]:
         """Get teacher by telegram ID."""
         try:
             if self.db is None:
                 return None
+            
+            from src.utils.credential_manager import credential_manager
                 
             teacher = self.db.teachers.find_one({"telegram_id": telegram_id})
             
             if teacher:
                 if '_id' in teacher:
                     teacher['_id'] = str(teacher['_id'])
+                # Decrypt password if exists
+                if teacher.get('plain_password'):
+                    decrypted = credential_manager.decrypt(teacher['plain_password'])
+                    if decrypted:  # Only use if decryption succeeded
+                        teacher['plain_password'] = decrypted
+                    else:
+                        # Decryption failed, remove invalid data
+                        teacher.pop('plain_password', None)
                 # Map fields for compatibility
                 teacher['mentor_id'] = teacher.get('id')
                 teacher['api_username'] = teacher.get('email')
-                teacher['api_password'] = teacher.get('password')  # This is hashed
+                teacher['api_password'] = teacher.get('password')
                 
             return teacher
             
@@ -289,162 +174,6 @@ class MongoRepository:
             logger.error(f"Error getting teacher by telegram ID: {e}")
             return None
     
-    # WEB INTERFACE METHODS
-    def get_all_teachers(self) -> List[Dict[str, Any]]:
-        """Get all teachers for web interface."""
-        try:
-            if self.db is None:
-                return []
-                
-            teachers = list(self.db.teachers.find({}))
-            
-            for teacher in teachers:
-                teacher['_id'] = str(teacher['_id'])
-                
-            return teachers
-            
-        except Exception as e:
-            logger.error(f"Error getting all teachers: {e}")
-            return []
-    
-    def get_all_students(self) -> List[Dict[str, Any]]:
-        """Get all students for web interface."""
-        try:
-            if self.db is None:
-                return []
-                
-            students = list(self.db.students.find({}))
-            
-            for student in students:
-                student['_id'] = str(student['_id'])
-                
-            return students
-            
-        except Exception as e:
-            logger.error(f"Error getting all students: {e}")
-            return []
-    
-    def create_teacher(self, teacher_data: Dict[str, Any]) -> str:
-        """Create new teacher."""
-        try:
-            if self.db is None:
-                raise Exception("Database not connected")
-            
-            from datetime import datetime
-            teacher_data['created_at'] = datetime.utcnow()
-            teacher_data['telegram_id'] = None
-            
-            result = self.db.teachers.insert_one(teacher_data)
-            return str(result.inserted_id)
-            
-        except Exception as e:
-            logger.error(f"Error creating teacher: {e}")
-            raise
-    
-    def create_student(self, student_data: Dict[str, Any]) -> str:
-        """Create new student."""
-        try:
-            if self.db is None:
-                raise Exception("Database not connected")
-            
-            from datetime import datetime
-            student_data['created_at'] = datetime.utcnow()
-            
-            result = self.db.students.insert_one(student_data)
-            return str(result.inserted_id)
-            
-        except Exception as e:
-            logger.error(f"Error creating student: {e}")
-            raise
-    
-    def get_teacher_by_id(self, teacher_id: str) -> Optional[Dict[str, Any]]:
-        """Get teacher by ID."""
-        try:
-            if self.db is None:
-                return None
-            
-            try:
-                from bson import ObjectId
-                teacher = self.db.teachers.find_one({"_id": ObjectId(teacher_id)})
-            except:
-                teacher = self.db.teachers.find_one({"_id": teacher_id})
-            
-            if teacher:
-                teacher['_id'] = str(teacher['_id'])
-                
-            return teacher
-            
-        except Exception as e:
-            logger.error(f"Error getting teacher by ID: {e}")
-            return None
-    
-    def update_teacher(self, teacher_id: str, update_data: Dict[str, Any]) -> bool:
-        """Update teacher."""
-        try:
-            if self.db is None:
-                return False
-            
-            from datetime import datetime
-            update_data['updated_at'] = datetime.utcnow()
-            
-            try:
-                from bson import ObjectId
-                result = self.db.teachers.update_one(
-                    {"_id": ObjectId(teacher_id)},
-                    {"$set": update_data}
-                )
-            except:
-                result = self.db.teachers.update_one(
-                    {"_id": teacher_id},
-                    {"$set": update_data}
-                )
-            
-            return result.modified_count > 0
-            
-        except Exception as e:
-            logger.error(f"Error updating teacher: {e}")
-            return False
-    
-    def get_teacher_count(self) -> int:
-        """Get total teacher count."""
-        try:
-            if self.db is None:
-                return 0
-            return self.db.teachers.count_documents({})
-        except Exception as e:
-            logger.error(f"Error getting teacher count: {e}")
-            return 0
-    
-    def get_student_count(self) -> int:
-        """Get total student count."""
-        try:
-            if self.db is None:
-                return 0
-            return self.db.students.count_documents({})
-        except Exception as e:
-            logger.error(f"Error getting student count: {e}")
-            return 0
-    
-    def get_batch_count(self) -> int:
-        """Get unique batch count."""
-        try:
-            if self.db is None:
-                return 0
-            batches = self.db.students.distinct("batch")
-            return len(batches)
-        except Exception as e:
-            logger.error(f"Error getting batch count: {e}")
-            return 0
-    
-    def get_all_batches(self) -> List[str]:
-        """Get all unique batches."""
-        try:
-            if self.db is None:
-                return []
-            return self.db.students.distinct("batch")
-        except Exception as e:
-            logger.error(f"Error getting batches: {e}")
-            return []
     
     def create_session_with_credentials(self, otp: str, lat: float, lng: float, batch_name: str, subject: str, students: dict, teacher_id: str = None, teacher_name: str = None, teacher_telegram_id: int = None, teacher_credentials: dict = None) -> bool:
         """Create a new session in MongoDB with teacher credentials."""
@@ -485,24 +214,7 @@ class MongoRepository:
         except Exception as e:
             logger.error(f"Error creating session: {e}")
             return False
-        """Save plain text password for teacher."""
-        try:
-            if self.db is None:
-                logger.warning("MongoDB not connected, cannot save password")
-                return False
-            
-            # Update teacher with plain password
-            result = self.db.teachers.update_one(
-                {"id": teacher_id},
-                {"$set": {"plain_password": plain_password}}
-            )
-            
-            logger.info(f"Saved password for teacher {teacher_id}")
-            return result.modified_count > 0
-            
-        except Exception as e:
-            logger.error(f"Error saving teacher password: {e}")
-            return False
+    
     def save_teacher_credentials(self, telegram_id: int, phone: str, email: str, password: str, name: str = None) -> bool:
         """Save teacher credentials for future logins."""
         try:
@@ -510,12 +222,16 @@ class MongoRepository:
                 return False
             
             from datetime import datetime
+            from src.utils.credential_manager import credential_manager
+            
+            # Normalize email to lowercase
+            email = email.lower().strip()
             
             teacher_data = {
                 'telegram_id': telegram_id,
                 'phone': phone,
                 'email': email,
-                'plain_password': password,
+                'plain_password': credential_manager.encrypt(password),
                 'name': name or 'Teacher',
                 'created_at': datetime.now(),
                 'updated_at': datetime.now()
@@ -528,9 +244,136 @@ class MongoRepository:
                 upsert=True
             )
             
-            logger.info(f"Saved credentials for teacher {email} (telegram_id: {telegram_id})")
+            logger.info(f"Saved encrypted credentials for teacher {email} (telegram_id: {telegram_id})")
             return True
             
         except Exception as e:
             logger.error(f"Error saving teacher credentials: {e}")
             return False
+    
+    def save_jwt_tokens(self, username: str, access_token: str, refresh_token: str, access_expiry: float, refresh_expiry: float) -> bool:
+        """Save JWT tokens to MongoDB for persistence across restarts.
+        
+        Args:
+            username: User's email/username
+            access_token: JWT access token
+            refresh_token: JWT refresh token
+            access_expiry: Access token expiry timestamp
+            refresh_expiry: Refresh token expiry timestamp
+            
+        Returns:
+            True if saved successfully
+        """
+        try:
+            if self.db is None:
+                return False
+            
+            from datetime import datetime
+            
+            token_data = {
+                'username': username.lower().strip(),
+                'access_token': access_token,
+                'refresh_token': refresh_token,
+                'access_expiry': access_expiry,
+                'refresh_expiry': refresh_expiry,
+                'updated_at': datetime.now()
+            }
+            
+            # Upsert based on username
+            result = self.db.jwt_tokens.update_one(
+                {'username': username.lower().strip()},
+                {'$set': token_data},
+                upsert=True
+            )
+            
+            logger.info(f"Saved JWT tokens for {username}")
+            return True
+            
+        except Exception as e:
+            logger.error(f"Error saving JWT tokens: {e}")
+            return False
+    
+    def get_jwt_tokens(self, username: str) -> Optional[Dict[str, Any]]:
+        """Retrieve JWT tokens from MongoDB.
+        
+        Args:
+            username: User's email/username
+            
+        Returns:
+            Token data dict or None
+        """
+        try:
+            if self.db is None:
+                return None
+            
+            import time
+            
+            token_data = self.db.jwt_tokens.find_one({'username': username.lower().strip()})
+            
+            if not token_data:
+                return None
+            
+            # Check if tokens are expired
+            current_time = time.time()
+            if token_data.get('refresh_expiry', 0) < current_time:
+                # Refresh token expired, delete and return None
+                self.db.jwt_tokens.delete_one({'username': username.lower().strip()})
+                logger.info(f"Deleted expired tokens for {username}")
+                return None
+            
+            return token_data
+            
+        except Exception as e:
+            logger.error(f"Error retrieving JWT tokens: {e}")
+            return None
+    
+    def delete_jwt_tokens(self, username: str) -> bool:
+        """Delete JWT tokens from MongoDB.
+        
+        Args:
+            username: User's email/username
+            
+        Returns:
+            True if deleted successfully
+        """
+        try:
+            if self.db is None:
+                return False
+            
+            result = self.db.jwt_tokens.delete_one({'username': username.lower().strip()})
+            
+            if result.deleted_count > 0:
+                logger.info(f"Deleted JWT tokens for {username}")
+            
+            return result.deleted_count > 0
+            
+        except Exception as e:
+            logger.error(f"Error deleting JWT tokens: {e}")
+            return False
+    
+    def cleanup_expired_sessions(self) -> int:
+        """Remove expired sessions from MongoDB.
+        
+        Returns:
+            Number of sessions deleted
+        """
+        try:
+            if self.db is None:
+                return 0
+            
+            from datetime import datetime
+            current_time = datetime.now().timestamp()
+            
+            # Delete sessions where expires_at < current_time
+            result = self.db.sessions.delete_many({
+                'expires_at': {'$lt': current_time}
+            })
+            
+            if result.deleted_count > 0:
+                logger.info(f"Cleaned up {result.deleted_count} expired sessions")
+            
+            return result.deleted_count
+            
+        except Exception as e:
+            logger.error(f"Error cleaning up expired sessions: {e}")
+            return 0

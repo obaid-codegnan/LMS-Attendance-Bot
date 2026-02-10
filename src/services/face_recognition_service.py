@@ -12,6 +12,9 @@ import numpy as np
 from concurrent.futures import ThreadPoolExecutor
 import asyncio
 from functools import partial
+from cachetools import TTLCache
+import threading
+import time
 
 logger = logging.getLogger(__name__)
 
@@ -22,9 +25,9 @@ class FaceRecognitionService:
         # Don't create shared clients - create per-request
         self.s3_bucket = Config.AWS_S3_BUCKET
         
-        # Simple in-memory cache for S3 images
-        self._image_cache = {}
-        self._cache_max_size = 100  # Cache up to 100 student images
+        # TTL cache with 5-minute expiry, max 100 items
+        self._image_cache = TTLCache(maxsize=100, ttl=300)
+        self._cache_lock = threading.Lock()
         
         # Dynamic worker allocation based on system resources
         worker_config = Config.get_optimal_workers()
@@ -73,8 +76,6 @@ class FaceRecognitionService:
     
     def _verify_face_from_bytes_sync(self, video_bytes: bytes, student_id: str, batch_name: str = None, request_id: str = None) -> Dict[str, Any]:
         """Synchronous face verification from bytes - runs in thread pool."""
-        import time
-        
         try:
             total_start = time.time()
             
@@ -126,7 +127,6 @@ class FaceRecognitionService:
     
     def _verify_face_sync(self, video_file, student_id: str, batch_name: str = None, request_id: str = None) -> Dict[str, Any]:
         """Synchronous face verification - runs in thread pool."""
-        import time
         temp_frame_path = None
         
         try:
@@ -169,10 +169,7 @@ class FaceRecognitionService:
                     pass
     
     def _extract_frame_from_video_bytes(self, video_bytes: bytes) -> bytes:
-        """Extract frame from video bytes - no download needed."""
-        import time
-        import tempfile
-        
+        """Extract single best frame from video bytes - fast extraction."""
         try:
             extract_start = time.time()
             
@@ -181,18 +178,20 @@ class FaceRecognitionService:
                 temp_file.write(video_bytes)
                 temp_path = temp_file.name
             
-            # Fast frame extraction
+            # Extract single frame from middle position
             cap = cv2.VideoCapture(temp_path)
             
             if not cap.isOpened():
                 os.unlink(temp_path)
                 return None
             
-            # Skip to middle frame (frame 7) for good quality
-            for i in range(7):
-                ret, frame = cap.read()
-                if not ret:
-                    break
+            # Get total frames and jump to middle (best quality)
+            total_frames = int(cap.get(cv2.CAP_PROP_FRAME_COUNT))
+            middle_frame = int(total_frames * 0.5) if total_frames > 10 else 7
+            
+            # Jump directly to middle frame
+            cap.set(cv2.CAP_PROP_POS_FRAMES, middle_frame)
+            ret, frame = cap.read()
             
             cap.release()
             os.unlink(temp_path)
@@ -214,8 +213,6 @@ class FaceRecognitionService:
     
     def _extract_frame_from_video_url(self, video_url: str) -> bytes:
         """Fast single frame capture."""
-        import time
-        
         try:
             extract_start = time.time()
             
@@ -248,8 +245,6 @@ class FaceRecognitionService:
     
     def _compare_faces_with_s3_bytes(self, frame_bytes: bytes, student_id: str, batch_name: str = None, request_id: str = None) -> Dict[str, Any]:
         """Compare extracted frame with stored S3 image using AWS Rekognition."""
-        import time
-        
         try:
 
             
@@ -270,13 +265,9 @@ class FaceRecognitionService:
             frame_bytes = self._resize_image_if_needed(frame_bytes)
             resize_time = time.time() - resize_start
             
-            # Step 3: AWS Rekognition comparison
+            # Step 3: AWS Rekognition comparison with retry
             aws_start = time.time()
-            response = rekognition.compare_faces(
-                SourceImage={'Bytes': stored_image_bytes},
-                TargetImage={'Bytes': frame_bytes},
-                SimilarityThreshold=Config.FACE_MATCH_THRESHOLD
-            )
+            response = self._compare_faces_with_retry(rekognition, stored_image_bytes, frame_bytes)
             aws_time = time.time() - aws_start
             
             if response['FaceMatches']:
@@ -302,7 +293,8 @@ class FaceRecognitionService:
                 total_time = s3_time + resize_time + aws_time
                 return {
                     "success": False,
-                    "error": "Face does not match stored image",
+                    "error": "No face detected in video",
+                    "no_face": True,
                     "timing": {
                         "s3_search": s3_time,
                         "image_resize": resize_time,
@@ -315,47 +307,66 @@ class FaceRecognitionService:
             logger.error(f"Face comparison error for {student_id}: {e}")
             return {"success": False, "error": f"Comparison failed: {str(e)}"}
     
-    def _find_student_image_in_s3(self, student_id: str, batch_name: str = None, request_id: str = None) -> tuple:
-        """Ultra-fast S3 image lookup with direct path access - handles multi-batch sessions."""
+    def _compare_faces_with_retry(self, rekognition, stored_image_bytes: bytes, frame_bytes: bytes, max_retries: int = 3) -> dict:
+        """Compare faces with exponential backoff retry and validation."""
+        # Validate images have detectable faces first
         try:
-            # Check cache first
-            cache_key = f"{batch_name}_{student_id}" if batch_name else student_id
-            if cache_key in self._image_cache:
-                logger.info(f"[{request_id}] Cache HIT for {student_id}")
-                return self._image_cache[cache_key]
+            # Quick face detection on frame
+            frame_faces = rekognition.detect_faces(
+                Image={'Bytes': frame_bytes},
+                Attributes=[]
+            )
+            if not frame_faces.get('FaceDetails'):
+                logger.warning("No face detected in video frame")
+                return {'FaceMatches': []}
+        except Exception as e:
+            logger.warning(f"Face detection failed on frame: {e}")
+            return {'FaceMatches': []}
+        
+        # Proceed with comparison
+        for attempt in range(max_retries):
+            try:
+                return rekognition.compare_faces(
+                    SourceImage={'Bytes': stored_image_bytes},
+                    TargetImage={'Bytes': frame_bytes},
+                    SimilarityThreshold=Config.FACE_MATCH_THRESHOLD
+                )
+            except Exception as e:
+                if attempt == max_retries - 1:
+                    raise
+                wait_time = (2 ** attempt) * 0.5
+                logger.warning(f"AWS Rekognition attempt {attempt + 1} failed: {e}. Retrying in {wait_time}s...")
+                time.sleep(wait_time)
+        return {}
+    
+    def _find_student_image_in_s3(self, student_id: str, batch_name: str = None, request_id: str = None) -> tuple:
+        """S3 image lookup - tries common extensions (.jpg, .jpeg, .png)."""
+        try:
+            # Check cache first with thread safety
+            cache_key = student_id
+            with self._cache_lock:
+                if cache_key in self._image_cache:
+                    logger.info(f"[{request_id}] Cache HIT for {student_id}")
+                    return self._image_cache[cache_key]
             
-            # Create isolated S3 client for this request
             s3_client = self._get_s3_client()
             
-            # Handle multi-batch sessions (e.g., "PFS-VIJ-021, PFS-VIJ-020")
-            if batch_name:
-                # Split by comma and try each batch
-                batches = [b.strip() for b in batch_name.split(',')]
-                
-                for batch in batches:
-                    s3_key = f"students/{batch}/{student_id}.jpg"
-                    try:
-                        response = s3_client.get_object(Bucket=self.s3_bucket, Key=s3_key)
-                        stored_image_bytes = response['Body'].read()
-                        
-                        # Cache the result
-                        if len(self._image_cache) >= self._cache_max_size:
-                            # Remove oldest entry
-                            oldest_key = next(iter(self._image_cache))
-                            del self._image_cache[oldest_key]
-                        
+            # Try common image extensions
+            for ext in ['.jpg', '.jpeg', '.png']:
+                s3_key = f"profile_pics/{student_id}{ext}"
+                try:
+                    response = s3_client.get_object(Bucket=self.s3_bucket, Key=s3_key)
+                    stored_image_bytes = response['Body'].read()
+                    
+                    with self._cache_lock:
                         self._image_cache[cache_key] = (stored_image_bytes, s3_key)
-                        logger.info(f"[{request_id}] Found: {s3_key}")
-                        return stored_image_bytes, s3_key
-                    except Exception as e:
-                        # Try next batch
-                        logger.debug(f"[{request_id}] Student {student_id} not found in {batch}, trying next batch")
-                        continue
-                
-                # If we get here, student not found in any batch
-                logger.error(f"[{request_id}] Student {student_id} not found in any batch: {batch_name}")
+                    
+                    logger.info(f"[{request_id}] Found: {s3_key}")
+                    return stored_image_bytes, s3_key
+                except:
+                    continue
             
-            logger.error(f"[{request_id}] No batch name or student {student_id} not found")
+            logger.error(f"[{request_id}] Student {student_id} not found in profile_pics")
             return None, None
             
         except Exception as e:
@@ -369,7 +380,6 @@ class FaceRecognitionService:
             if len(image_bytes) <= max_size:
                 return image_bytes
             
-            import numpy as np
             nparr = np.frombuffer(image_bytes, np.uint8)
             img = cv2.imdecode(nparr, cv2.IMREAD_COLOR)
             

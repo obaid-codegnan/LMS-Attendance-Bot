@@ -28,16 +28,7 @@ class Config:
     HOST: str = os.getenv("HOST", "127.0.0.1")  # More secure default
     PORT: int = int(os.getenv("PORT", "5000"))
     
-    # Google Drive Configuration
-    GOOGLE_DRIVE_CREDENTIALS_PATH: str = os.getenv(
-        "GOOGLE_DRIVE_CREDENTIALS_PATH", 
-        "credentials.json"
-    )
-    GOOGLE_DRIVE_TOKEN_PATH: str = os.getenv(
-        "GOOGLE_DRIVE_TOKEN_PATH",
-        "token.json"
-    )
-    GOOGLE_DRIVE_FOLDER_ID: Optional[str] = os.getenv("GOOGLE_DRIVE_FOLDER_ID")
+    
     
     # Camera Configuration
     CAMERA_INDEX: int = int(os.getenv("CAMERA_INDEX", "1"))
@@ -68,7 +59,7 @@ class Config:
     AWS_REGION: str = os.getenv("AWS_REGION", "us-east-1")
     FACE_DETECTION_PROVIDER: str = os.getenv("FACE_DETECTION_PROVIDER", "aws")
     AWS_S3_BUCKET: Optional[str] = os.getenv("AWS_S3_BUCKET")
-    AWS_REKOGNITION_COLLECTION_ID: str = os.getenv("AWS_REKOGNITION_COLLECTION_ID", "students_collection")
+    # AWS_REKOGNITION_COLLECTION_ID - Not used (system uses direct face comparison via compare_faces API)
     
     # MongoDB Configuration
     MONGODB_URI: Optional[str] = os.getenv("MONGODB_URI")
@@ -92,6 +83,7 @@ class Config:
     
     # Face Recognition Settings
     DEFAULT_FACE_THRESHOLD: float = float(os.getenv("FACE_MATCH_THRESHOLD", "50.0"))
+    FACE_VERIFICATION_MAX_RETRIES: int = int(os.getenv("FACE_VERIFICATION_MAX_RETRIES", "1"))
     IMAGE_COMPRESSION_START_QUALITY: int = int(os.getenv("IMAGE_COMPRESSION_START_QUALITY", "80"))
     AWS_MAX_RETRIES: int = int(os.getenv("AWS_MAX_RETRIES", "3"))
     
@@ -143,19 +135,7 @@ class Config:
     ATTENDANCE_API_BASE_URL: str = os.getenv("ATTENDANCE_API_BASE_URL", "http://127.0.0.1:5000/api/v1")
     DEFAULT_LOCATION: str = os.getenv("DEFAULT_LOCATION", "vijayawada")
     # Temporary teacher mapping until teacher API is available
-    TEMP_TEACHER_MAPPING: dict = {
-        "+919876543210": {
-            "teacher_id": "teacher_1",
-            "name": "John Doe",
-            "mentor_id": "bafceeb1-8638-4854-8210-7be787420dec"
-        },
-        # Add Shaik Obaid's phone number here
-        "+919701296465": {
-            "teacher_id": "teacher_2", 
-            "name": "Shaik Obaid",
-            "mentorId": "bafceeb1-8638-4854-8210-7be787420dec"  # Use actual mentor_id
-        }
-    }
+    
 
     @staticmethod
     def _resolve_path(path_str: str) -> str:
@@ -188,6 +168,16 @@ class Config:
         missing_vars = [var_name for var_name, var_value in required_vars if not var_value]
         if missing_vars:
             raise ValueError(f"Missing required environment variables: {', '.join(missing_vars)}")
+        
+        # Validate numeric ranges
+        if Config.FACE_MATCH_THRESHOLD < 0 or Config.FACE_MATCH_THRESHOLD > 100:
+            raise ValueError("FACE_MATCH_THRESHOLD must be between 0 and 100")
+        
+        if Config.OTP_EXPIRY_SECONDS < 30:
+            raise ValueError("OTP_EXPIRY_SECONDS must be at least 30")
+        
+        if Config.LOCATION_DISTANCE_LIMIT_METERS < 10:
+            raise ValueError("LOCATION_DISTANCE_LIMIT_METERS must be at least 10")
         
         # Validate file paths (Google Drive is optional)
         if os.path.exists(Config.GOOGLE_DRIVE_CREDENTIALS_PATH):

@@ -26,8 +26,7 @@ class APIService:
     _refresh_tokens = {}  # Store refresh tokens per user
     
     def __init__(self):
-        self.base_url = os.getenv("BASE_URL", "https://attendance.codegnan.ai/api/v1")  # Remove trailing slash
-        self.old_base_url = os.getenv("OLD_BASE_URL", "https://attendance.codegnan.ai/api/v1")
+        self.base_url = os.getenv("BASE_URL", "https://attendance.codegnan.ai/api/v1")
         
         # JWT configuration
         self.jwt_secret = os.getenv("JWT_SECRET_KEY")
@@ -56,7 +55,7 @@ class APIService:
         
         logger.debug(f"Getting access token for user: {user_key}")
         
-        # Check if we have a valid access token
+        # Check memory cache first
         if user_key in self._access_tokens:
             token_data, expiry = self._access_tokens[user_key]
             if current_time < (expiry - 60):  # 1 minute buffer
@@ -65,7 +64,30 @@ class APIService:
             else:
                 logger.debug(f"Token expired for {user_key}, will refresh")
         
-        # Try to refresh using refresh token first
+        # Check MongoDB for persisted tokens
+        try:
+            from src.repositories.mongo_repository import MongoRepository
+            mongo_repo = MongoRepository()
+            token_data = mongo_repo.get_jwt_tokens(user_key)
+            
+            if token_data:
+                access_expiry = token_data.get('access_expiry', 0)
+                if current_time < (access_expiry - 60):
+                    # Valid access token in DB
+                    self._access_tokens[user_key] = (token_data['access_token'], access_expiry)
+                    self._refresh_tokens[user_key] = (token_data['refresh_token'], token_data['refresh_expiry'])
+                    logger.debug(f"Loaded tokens from MongoDB for {user_key}")
+                    return token_data['access_token']
+                elif current_time < token_data.get('refresh_expiry', 0):
+                    # Access expired but refresh valid
+                    logger.debug(f"Attempting token refresh from MongoDB for {user_key}")
+                    new_access_token = self._refresh_access_token(token_data['refresh_token'])
+                    if new_access_token:
+                        return new_access_token
+        except Exception as e:
+            logger.warning(f"Error loading tokens from MongoDB: {e}")
+        
+        # Try to refresh using refresh token from memory
         if user_key in self._refresh_tokens:
             refresh_token, refresh_expiry = self._refresh_tokens[user_key]
             if current_time < refresh_expiry:
@@ -118,6 +140,14 @@ class APIService:
                         user_key = username
                         self._access_tokens[user_key] = (access_token, access_expiry)
                         self._refresh_tokens[user_key] = (refresh_token, refresh_expiry)
+                        
+                        # Persist to MongoDB
+                        try:
+                            from src.repositories.mongo_repository import MongoRepository
+                            mongo_repo = MongoRepository()
+                            mongo_repo.save_jwt_tokens(username, access_token, refresh_token, access_expiry, refresh_expiry)
+                        except Exception as e:
+                            logger.warning(f"Failed to persist tokens to MongoDB: {e}")
                         
                         logger.info(f"Successfully obtained tokens for {username}")
                         return access_token
@@ -195,41 +225,6 @@ class APIService:
         except Exception as e:
             logger.warning(f"Logout failed for {username}: {e}")
             return False
-        """Use refresh token to get new access token."""
-        try:
-            refresh_url = f"{self.base_url.rstrip('/api/v1')}/auth/refresh"
-            headers = {
-                'Authorization': f'Bearer {refresh_token}',
-                'Content-Type': 'application/json'
-            }
-            
-            response = requests.post(refresh_url, headers=headers, timeout=10)
-            
-            if response.status_code == 200:
-                token_data = response.json()
-                new_access_token = token_data.get("access_token")
-                
-                if new_access_token:
-                    # Update access token cache
-                    try:
-                        decoded = jwt.decode(new_access_token, options={"verify_signature": False})
-                        expiry = decoded.get("exp", time.time() + 300)
-                        username = decoded.get("sub") or decoded.get("email")
-                        
-                        if username:
-                            self._access_tokens[username] = (new_access_token, expiry)
-                            logger.info(f"Successfully refreshed access token for {username}")
-                            return new_access_token
-                    except Exception as e:
-                        logger.warning(f"Could not decode refreshed token: {e}")
-                        return new_access_token
-            else:
-                logger.warning(f"Token refresh failed: {response.status_code}")
-                return None
-                
-        except Exception as e:
-            logger.warning(f"Token refresh error: {e}")
-            return None
     
     def _refresh_access_token(self, refresh_token: str) -> Optional[str]:
         """Use refresh token to get new access token."""
@@ -255,6 +250,18 @@ class APIService:
                         
                         if username:
                             self._access_tokens[username] = (new_access_token, expiry)
+                            
+                            # Persist to MongoDB
+                            try:
+                                from src.repositories.mongo_repository import MongoRepository
+                                mongo_repo = MongoRepository()
+                                # Get existing refresh token
+                                if username in self._refresh_tokens:
+                                    refresh_token, refresh_expiry = self._refresh_tokens[username]
+                                    mongo_repo.save_jwt_tokens(username, new_access_token, refresh_token, expiry, refresh_expiry)
+                            except Exception as e:
+                                logger.warning(f"Failed to persist refreshed token to MongoDB: {e}")
+                            
                             logger.info(f"Successfully refreshed access token for {username}")
                             return new_access_token
                     except Exception as e:
@@ -283,17 +290,6 @@ class APIService:
             logger.warning(f"No access token available for user: {username or 'default'}")
         
         return headers
-        """Get headers with access token."""
-        headers = {
-            'Content-Type': 'application/json',
-            'Accept': 'application/json'
-        }
-        
-        access_token = self._get_access_token(username, password)
-        if access_token:
-            headers['Authorization'] = f'Bearer {access_token}'
-        
-        return headers
     
     def get_teacher_attendance_data(self, mentor_id: str) -> Optional[Dict]:
         """Get attendance data for a mentor from external API with caching."""
@@ -310,7 +306,7 @@ class APIService:
         
         try:
             api_start = time.time()
-            url = f"{self.old_base_url}/attendance"
+            url = f"{self.base_url}/attendance"
             params = {
                 "mentorId": mentor_id,
                 "role": "Mentor"
@@ -364,7 +360,7 @@ class APIService:
                 return {}
             
             # Get attendance data using mentor_id
-            url = f"{self.old_base_url}/attendance"
+            url = f"{self.base_url}/attendance"
             params = {
                 "mentorId": mentor_id,
                 "role": "Mentor"
@@ -431,7 +427,7 @@ class APIService:
             headers = self._get_headers()
             
             # Get attendance data using mentor_id
-            url = f"{self.old_base_url}/attendance"
+            url = f"{self.base_url}/attendance"
             params = {
                 "mentorId": mentor_id,
                 "role": "Mentor"

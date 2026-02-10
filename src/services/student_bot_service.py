@@ -68,6 +68,8 @@ class StudentBotService:
             per_message=False
         )
         self.app.add_handler(conv_handler)
+        self.app.add_handler(CommandHandler("help", self.help_command))
+        self.app.add_error_handler(self.error_handler)
         logger.info("Student Bot Handlers Configured.")
 
     async def start(self, update: Update, context: ContextTypes.DEFAULT_TYPE):
@@ -245,16 +247,16 @@ class StudentBotService:
             if success:
                 # Get queue stats for user feedback
                 stats = face_queue.get_stats()
-                
-                
+                # Stay in SELFIE state to allow retry
+                return SELFIE
             else:
                 await update.message.reply_text(messages.student('queue_full', request_id=request_id))
+                return SELFIE
                 
         except Exception as e:
             logger.error(f"[{request_id}] Error queuing task for {student_id}: {e}")
             await update.message.reply_text(messages.student('processing_error', request_id=request_id))
-        
-        return ConversationHandler.END
+            return SELFIE
 
     async def receive_photo(self, update: Update, context: ContextTypes.DEFAULT_TYPE):
         await update.message.reply_text(messages.student('wrong_media_photo'))
@@ -267,6 +269,48 @@ class StudentBotService:
     async def cancel(self, update: Update, context: ContextTypes.DEFAULT_TYPE):
         await update.message.reply_text(messages.student('cancelled'), reply_markup=ReplyKeyboardRemove())
         return ConversationHandler.END
+    
+    async def help_command(self, update: Update, context: ContextTypes.DEFAULT_TYPE):
+        """Show help information."""
+        help_text = f"""📖 **How to Mark Attendance**
+
+1️⃣ Send /start
+2️⃣ Enter your **Student ID**
+3️⃣ Enter the **OTP** from teacher
+4️⃣ Share your **location**
+5️⃣ Record a **video note** of your face
+
+💡 **Tips for Success:**
+• Ensure good lighting
+• Face the camera directly
+• Be within {Config.LOCATION_DISTANCE_LIMIT_METERS} meters of classroom
+• You get {Config.FACE_VERIFICATION_MAX_RETRIES + 1} total attempts
+
+📹 **Video Note:**
+Tap the microphone icon and hold to record a circular video (not regular video)
+
+❓ **Having Issues?**
+Contact your teacher for help"""
+        await update.message.reply_text(help_text, parse_mode='Markdown')
+    
+    async def error_handler(self, update: Update, context: ContextTypes.DEFAULT_TYPE):
+        """Handle errors in the bot."""
+        from telegram.error import NetworkError, TimedOut
+        
+        error = context.error
+        logger.error(f"Bot error: {error}", exc_info=context.error)
+        
+        if isinstance(error, (NetworkError, TimedOut)):
+            logger.warning(f"Network error (auto-retry): {error}")
+            return
+        
+        if update and update.effective_message:
+            try:
+                await update.effective_message.reply_text(
+                    "⚠️ An error occurred. Please try again or contact support."
+                )
+            except:
+                pass
 
     def run_polling(self):
         """Start bot polling."""

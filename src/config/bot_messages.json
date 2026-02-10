@@ -51,7 +51,11 @@
   },
   "face_verification": {
     "success": "✅ **Attendance Marked Successfully!**\n\n👤 Student: {student_id}\n📚 Batch: {batch}\n📖 Subject: {subject}\n",
-    "face_not_match": "❌ **Face Verification Failed**\n\n👤 Student: {student_id}\n🔍 Confidence: {confidence}%\n📋 Required: {threshold}%\n\n_Please try again with better lighting and face the camera directly._\n",
+    "already_marked": "✅ **Attendance Already Marked**\n\n👤 Student: {student_id}\n\nYour attendance has already been recorded for this session.",
+    "face_not_match": "❌ **Face Verification Failed**\n\n👤 Student: {student_id}\n🔍 Confidence: {confidence}%\n📋 Required: {threshold}%\n\n_This was your final attempt. Please contact your teacher._\n",
+    "face_not_match_retry": "⚠️ **Face Verification Failed**\n\n👤 Student: {student_id}\n🔍 Confidence: {confidence}%\n📋 Required: {threshold}%\n\n🔄 **You have {attempts_left} more attempt.**\n_Please try again with better lighting and face the camera directly._\n",
+    "no_face_detected": "❌ **No Face Detected**\n\n👤 Student: {student_id}\n\n_This was your final attempt. Please contact your teacher._\n",
+    "no_face_retry": "⚠️ Attendance Not Marked\n**Try again**\n\n👤 Student: {student_id}\n\n🔄 **You have {attempts_left} more attempt.**\n_Please record a clear video with your face visible. Ensure good lighting and face the camera directly._\n",
     "image_not_found": "❌ **ID Photo Not Found**\n\n👤 Student: {student_id}\n📚 Batch: {batch}\n\n_Your ID photo is not in the system. Please contact admin to upload your photo._\n",
     "processing_error": "❌ **Processing Error**\n\n👤 Student: {student_id}\n⚠️ Error: {error}\n\n_Please try again or contact support._\n",
     "api_error": "❌ **Attendance Submission Failed**\n\n👤 Student: {student_id}\n⚠️ API Error: {error}\n\n_Please try again or contact teacher._\n"

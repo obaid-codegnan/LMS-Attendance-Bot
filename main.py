@@ -1,6 +1,6 @@
 """
 Main Application Runner
-Starts Teacher Bot, Student Bot, and Web Interface
+Starts Teacher Bot and Student Bot
 """
 import logging
 import threading
@@ -8,6 +8,7 @@ import asyncio
 import signal
 import sys
 import os
+import time
 from src.services.teacher_bot_service import TeacherBotService
 from src.services.student_bot_service import StudentBotService
 from src.config.settings import Config
@@ -79,22 +80,6 @@ def run_student_bot():
         import traceback
         traceback.print_exc()
 
-def run_web_interface():
-    """Run web interface in separate thread."""
-    try:
-        from src.web.app import app
-        import os
-        
-        # Use PORT from environment (Render sets this)
-        port = int(os.environ.get('PORT', 5000))
-        host = os.environ.get('HOST', '0.0.0.0')
-        
-        logger.info(f"Starting Web Interface on {host}:{port}")
-        logger.info(f"Listening on 0.0.0.0:{port}")
-        app.run(host=host, port=port, debug=False, use_reloader=False, threaded=True)
-    except Exception as e:
-        logger.error(f"Web Interface error: {e}")
-
 def main():
     """Main application entry point."""
     # Setup signal handlers
@@ -102,20 +87,11 @@ def main():
     signal.signal(signal.SIGTERM, signal_handler)
     
     logger.info("=== Face Recognition Attendance System ===")
-    logger.info("Starting all services...")
-    
-    # Get PORT from environment for Render
-    port = int(os.environ.get('PORT', 5000))
-    host = os.environ.get('HOST', '0.0.0.0')
-    logger.info(f"Using PORT: {port}, HOST: {host}")
+    logger.info("Starting Telegram Bot services...")
     
     # Initialize face verification queue
     from src.utils.face_verification_queue import face_queue
     logger.info("Face verification queue initialized")
-    
-    # Start cache cleanup service
-    from src.utils.cache_cleanup import start_cache_cleanup
-    start_cache_cleanup()
     
     # Start services in separate threads
     threads = []
@@ -138,14 +114,7 @@ def main():
     else:
         logger.warning("STUDENT_BOT_TOKEN not set - Student Bot disabled")
     
-    # Web Interface Thread
-    web_thread = threading.Thread(target=run_web_interface, daemon=True)
-    web_thread.start()
-    threads.append(web_thread)
-    logger.info("Web Interface thread started")
-    
     logger.info("All services started successfully!")
-    logger.info("Access Web Interface: http://localhost:5001")
     logger.info("Press Ctrl+C to stop all services")
     
     try:
@@ -159,8 +128,20 @@ def main():
         # Cleanup thread pools and queue
         logger.info("Cleaning up thread pools...")
         try:
-            # Shutdown face verification queue
+            # Fast shutdown: stop accepting and force exit
             from src.utils.face_verification_queue import face_queue
+            logger.info("Stopping queue and draining tasks...")
+            face_queue.stop_accepting()
+            
+            # Wait for queue to drain (max 5 seconds only)
+            timeout = 5
+            start_time = time.time()
+            while face_queue.get_stats()['queue_size'] > 0:
+                if time.time() - start_time > timeout:
+                    logger.warning(f"Shutdown timeout after {timeout}s, forcing exit")
+                    break
+                time.sleep(0.5)
+            
             face_queue.shutdown()
             
             if teacher_service_instance and hasattr(teacher_service_instance, 'attendance_service'):
@@ -173,9 +154,6 @@ def main():
         except Exception as cleanup_error:
             logger.error(f"Error during cleanup: {cleanup_error}")
         
-        # Stop cache cleanup
-        from src.utils.cache_cleanup import stop_cache_cleanup
-        stop_cache_cleanup()
         logger.info("All services stopped.")
         sys.exit(0)
 

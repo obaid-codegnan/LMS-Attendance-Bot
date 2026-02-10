@@ -35,8 +35,6 @@ class FaceRepository:
         try:
             from botocore.config import Config as BotoConfig
             
-            from botocore.config import Config as BotoConfig
-            
             # Standard retry mode handles connection errors and throttling
             retry_config = BotoConfig(
                 retries={
@@ -226,9 +224,28 @@ class FaceRepository:
                 return []
         return []
 
-    def index_face(self, image_bucket: str, image_key: str, external_image_id: str) -> bool:
-        """Index a face from S3."""
-        collection_id = Config.AWS_REKOGNITION_COLLECTION_ID
+    def index_face(self, image_bucket: str, image_key: str, external_image_id: str, collection_id: str = None) -> bool:
+        """Index a face from S3 into Rekognition Collection.
+        
+        NOTE: This method is not currently used by the system. The application uses
+        direct face comparison via compare_faces() API instead of collection-based
+        indexing/searching for better performance and simpler architecture.
+        
+        Kept for potential future use if collection-based face search is needed.
+        
+        Args:
+            image_bucket: S3 bucket containing the face image
+            image_key: S3 key of the face image
+            external_image_id: External ID to associate with the indexed face
+            collection_id: Rekognition collection ID (required if using this method)
+        
+        Returns:
+            True if face was successfully indexed, False otherwise
+        """
+        if not collection_id:
+            logger.error("collection_id parameter is required for index_face operation")
+            return False
+            
         try:
             response = self.client.index_faces(
                 CollectionId=collection_id,

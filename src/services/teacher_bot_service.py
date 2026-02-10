@@ -76,6 +76,8 @@ class TeacherBotService:
         )
         
         self.app.add_handler(conv_handler)
+        self.app.add_handler(CommandHandler("help", self.help_command))
+        self.app.add_error_handler(self.error_handler)
         logger.info("Teacher Bot Handlers Configured.")
 
     async def start(self, update: Update, context: ContextTypes.DEFAULT_TYPE):
@@ -150,54 +152,6 @@ class TeacherBotService:
             reply_markup=markup
         )
         return BATCH
-        """Handle password entry for first-time setup."""
-        password = update.message.text.strip()
-        teacher = context.user_data.get('teacher')
-        
-        if not teacher:
-            await update.message.reply_text(messages.teacher('session_expired'))
-            return ConversationHandler.END
-        
-        # Test credentials
-        username = teacher.get('email')
-        context.user_data['api_username'] = username
-        context.user_data['api_password'] = password
-        
-        await update.message.reply_text(messages.teacher('loading_batches'))
-        
-        from src.services.api_service import APIService
-        api_service = APIService()
-        
-        loop = asyncio.get_event_loop()
-        batch_subject_map = await loop.run_in_executor(
-            None, 
-            lambda: api_service.get_available_batches_and_subjects_with_auth(username, password)
-        )
-        
-        if not batch_subject_map:
-            await update.message.reply_text(messages.teacher('invalid_password'))
-            return PASSWORD
-        
-        # Save password to MongoDB for future use
-        self.mongo_repo.save_teacher_password(teacher.get('id'), password)
-        
-        # Link telegram ID
-        self.mongo_repo.update_teacher_telegram_id(teacher.get('id'), update.effective_user.id)
-        
-        # Show batch selection
-        available_batches = list(batch_subject_map.keys())
-        context.user_data['available_batches'] = available_batches
-        context.user_data['batch_subject_map'] = batch_subject_map
-        context.user_data['selected_batches'] = []
-        context.user_data['mentor_id'] = teacher.get('id')
-        
-        markup = self._get_batch_markup(available_batches, [])
-        await update.message.reply_text(
-            messages.teacher('password_saved', name=teacher.get('name')), 
-            parse_mode='Markdown', 
-            reply_markup=markup
-        )
-        return BATCH
     
     async def handle_password_entry(self, update: Update, context: ContextTypes.DEFAULT_TYPE):
         """Handle password entry and verify via API."""
@@ -217,7 +171,7 @@ class TeacherBotService:
             return PASSWORD
         
         # Now we have both username and password
-        username = password  # This is actually the username now
+        username = password.lower().strip()  # Normalize email to lowercase
         actual_password = context.user_data.get('api_password')
         
         context.user_data['api_username'] = username
@@ -302,141 +256,6 @@ class TeacherBotService:
         )
         
         return PASSWORD
-        """Handle phone number verification."""
-        if not update.message.contact:
-            await update.message.reply_text(
-                "❌ Please use the 'Share Contact' button to verify your identity."
-            )
-            return CREDENTIALS
-        
-        phone = update.message.contact.phone_number
-        
-        # Normalize phone number
-        if not phone.startswith('+'):
-            phone = '+' + phone
-        
-        logger.info(f"Phone verification for: {phone}")
-        
-        # Check if teacher exists with this phone number
-        teacher = self.mongo_repo.get_teacher_by_phone(phone)
-        
-        if not teacher:
-            await update.message.reply_text(
-                f"❌ Phone number {phone} not registered.\n"
-                f"Please contact admin to register your number.",
-                reply_markup=ReplyKeyboardRemove()
-            )
-            return ConversationHandler.END
-        
-        # Store teacher info
-        context.user_data['teacher'] = teacher
-        context.user_data['phone'] = phone
-        
-        # Check if we already have stored password
-        if teacher.get('plain_password'):
-            # Password already stored, proceed directly
-            context.user_data['api_username'] = teacher['email']
-            context.user_data['api_password'] = teacher['plain_password']
-            
-            # Link telegram ID
-            self.mongo_repo.update_teacher_telegram_id(teacher.get('id'), update.effective_user.id)
-            
-            await update.message.reply_text(
-                f"✅ Welcome back **{teacher.get('name')}**!\n🔄 Loading your batches...",
-                parse_mode='Markdown',
-                reply_markup=ReplyKeyboardRemove()
-            )
-            
-            return await self._load_batches_with_teacher_credentials(update, context, teacher)
-        
-        # Need password for first time setup
-        await update.message.reply_text(
-            f"✅ Verified as **{teacher.get('name')}**!\n\n"
-            f"🔐 Please enter your login password for **{teacher.get('email')}**:\n\n"
-            f"💡 *This will be saved securely for future use.*",
-            parse_mode='Markdown',
-            reply_markup=ReplyKeyboardRemove()
-        )
-        
-        return PASSWORD
-
-    async def verify_contact(self, update: Update, context: ContextTypes.DEFAULT_TYPE):
-        phone = update.message.contact.phone_number
-        return await self._verify_identity(update, context, phone)
-
-    async def verify_text(self, update: Update, context: ContextTypes.DEFAULT_TYPE):
-        phone = update.message.text.strip()
-        return await self._verify_identity(update, context, phone)
-
-    async def _verify_identity(self, update: Update, context: ContextTypes.DEFAULT_TYPE, phone: str) -> int:
-        """Verify teacher identity using MongoDB or API fallback."""
-        if not phone.startswith('+'):
-            phone = '+' + phone if len(phone) < 13 else phone 
-        
-        logger.info(f"Verifying Teacher Identity: {phone}")
-
-        # Try MongoDB first
-        teacher = self.mongo_repo.get_teacher_by_phone(phone)
-        
-        if teacher:
-            # Link telegram ID
-            self.mongo_repo.update_teacher_telegram_id(teacher['_id'], update.effective_user.id)
-            
-            context.user_data['teacher'] = teacher
-            await update.message.reply_text(f"✅ Verified as Teacher: **{teacher.get('name', 'Teacher')}**!", parse_mode='Markdown')
-            return await self._show_batch_options_from_mongodb(update, context, teacher)
-        
-        # Fallback to temporary mapping if MongoDB fails
-        logger.warning("MongoDB not available, using temporary mapping")
-        teacher_mapping = Config.TEMP_TEACHER_MAPPING
-        teacher = teacher_mapping.get(phone)
-        
-        if teacher:
-            context.user_data['teacher'] = teacher
-            await update.message.reply_text(f"✅ Verified as Teacher: **{teacher['name']}**!", parse_mode='Markdown')
-            return await self._show_batch_options_from_mongodb(update, context, teacher)
-        else:
-            # Show available phone numbers for debugging
-            available_phones = list(teacher_mapping.keys())
-            await update.message.reply_text(
-                f"❌ Access Denied. Your number ({phone}) is not registered.\n"
-                f"Available numbers: {', '.join(available_phones)}", 
-                reply_markup=ReplyKeyboardRemove()
-            )
-            return ConversationHandler.END
-
-    async def _show_batch_options_from_api(self, update: Update, context: ContextTypes.DEFAULT_TYPE, teacher):
-        """Get batches from external API based on hardcoded mentor_id."""
-        # Use hardcoded mentor_id for testing
-        mentor_id = teacher.get('mentor_id', "bafceeb1-8638-4854-8210-7be787420dec")
-        
-        # Fetch from external API asynchronously
-        from src.services.api_service import APIService
-        api_service = APIService()
-        
-        loop = asyncio.get_event_loop()
-        batch_subject_map = await loop.run_in_executor(
-            None, 
-            api_service.get_available_batches_and_subjects, 
-            mentor_id
-        )
-        
-        if not batch_subject_map:
-            await update.message.reply_text(
-                "❌ No pending attendance found for today. Please contact admin.",
-                reply_markup=ReplyKeyboardRemove()
-            )
-            return ConversationHandler.END
-        
-        available_batches = list(batch_subject_map.keys())
-        context.user_data['available_batches'] = available_batches
-        context.user_data['batch_subject_map'] = batch_subject_map
-        context.user_data['mentor_id'] = mentor_id
-        context.user_data['selected_batches'] = []
-        
-        markup = self._get_batch_markup(available_batches, [])
-        await update.message.reply_text("📚 **Select Batches**:", parse_mode='Markdown', reply_markup=markup)
-        return BATCH
 
     def _get_batch_markup(self, available: List[str], selected: List[str]) -> InlineKeyboardMarkup:
         """Generate inline keyboard markup for batch selection."""
@@ -530,7 +349,8 @@ class TeacherBotService:
         teacher = context.user_data.get('teacher', {})
         batch_str = context.user_data.get('sess_batch', '')
         today = datetime.now().strftime("%Y-%m-%d")
-        existing_session = self._check_existing_session(teacher.get('_id'), batch_str, subject, today)
+        teacher_id = teacher.get('_id') or teacher.get('id')
+        existing_session = self._check_existing_session(teacher_id, batch_str, subject, today)
         
         if existing_session:
             await update.message.reply_text(
@@ -617,9 +437,10 @@ class TeacherBotService:
             return ConversationHandler.END
         
         # Create session data
+        teacher_id = teacher.get('_id') or teacher.get('id')
         session_data = {
             'otp': otp,
-            'teacher_id': teacher.get('_id'),
+            'teacher_id': teacher_id,
             'teacher_name': teacher.get('name'),
             'teacher_telegram_id': teacher.get('telegram_id'),
             'batch_name': batch_str,
@@ -639,7 +460,7 @@ class TeacherBotService:
             batch_name=batch_str,
             subject=subject,
             students=all_students,
-            teacher_id=teacher.get('_id'),
+            teacher_id=teacher_id,
             teacher_name=teacher.get('name'),
             teacher_telegram_id=teacher.get('telegram_id'),
             teacher_credentials={
@@ -714,7 +535,7 @@ class TeacherBotService:
 
     async def _schedule_report(self, otp: str, session_data: dict, delay_seconds: int, teacher_credentials: dict = None):
         """Schedule attendance report generation after OTP expiry."""
-        await asyncio.sleep(delay_seconds + 30)  # Wait extra 30 seconds for final submissions
+        await asyncio.sleep(delay_seconds + 15)  # Wait extra 15 seconds for final submissions
         
         try:
             # Generate attendance report using teacher credentials
@@ -764,6 +585,54 @@ class TeacherBotService:
         """Cancel conversation."""
         await update.message.reply_text(messages.teacher('cancelled'), reply_markup=ReplyKeyboardRemove())
         return ConversationHandler.END
+    
+    async def help_command(self, update: Update, context: ContextTypes.DEFAULT_TYPE):
+        """Show help information for teachers."""
+        help_text = f"""📖 **Teacher Bot Guide**
+
+1️⃣ Send /start
+2️⃣ Share your **contact** for verification
+3️⃣ Enter your **password** (saved for future use)
+4️⃣ Select **batches** (multi-select supported)
+5️⃣ Choose **subject**
+6️⃣ Share your **location** to generate OTP
+
+📋 **Session Details:**
+• OTP expires in {Config.OTP_EXPIRY_SECONDS // 60} minutes
+• Students must be within {Config.LOCATION_DISTANCE_LIMIT_METERS}m
+• Attendance report sent automatically after session
+
+💡 **Tips:**
+• Share OTP with students immediately
+• Stay at location until all students mark attendance
+• Check report for absent students
+
+❓ **Need Help?**
+Contact technical support"""
+        await update.message.reply_text(help_text, parse_mode='Markdown')
+    
+    async def error_handler(self, update: Update, context: ContextTypes.DEFAULT_TYPE):
+        """Handle errors in the bot."""
+        from telegram.error import NetworkError, TimedOut
+        
+        error = context.error
+        
+        # Log all errors
+        logger.error(f"Bot error: {error}", exc_info=context.error)
+        
+        # Handle specific error types silently (expected errors)
+        if isinstance(error, (NetworkError, TimedOut)):
+            logger.warning(f"Network error (auto-retry): {error}")
+            return
+        
+        # For unexpected errors, notify user if update is available
+        if update and update.effective_message:
+            try:
+                await update.effective_message.reply_text(
+                    "⚠️ An error occurred. Please try again or contact support."
+                )
+            except:
+                pass
     
     def run_polling(self):
         """Start bot polling."""
